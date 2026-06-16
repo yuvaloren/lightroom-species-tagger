@@ -12,15 +12,23 @@ and the resolver is exercised against the real species mix.
 
 It writes:
   * spec/fixtures/groundtruth/yuvalsaw.lua  — the full labelled dataset
-  * spec/fixtures/lens/<slug>.json          — a representative Lens results blob
-      for each `corpus = true` entry (titles seeded from the resolved names +
-      noise), so the offline accuracy suite covers the breadth of taxa
+  * spec/fixtures/lens/<slug>.json          — the Lens results for each
+      `corpus = true` entry: a representative blob by default, or the REAL Google
+      Lens capture with --live
   * spec/fixtures/gbif/*.json               — REAL GBIF captures the offline
       pipeline replays for those corpus cases
+  * spec/fixtures/lens/raw/<slug>.html      — (only with --live) Google's raw
+      response, so you can audit that the saved fixtures are genuinely Google's
 and prints the manifest cases to paste into spec/fixtures/manifest.lua.
 
-Usage:  lua scripts/build-corpus.lua            (resolve + write dataset)
-        lua scripts/build-corpus.lua --corpus   (also (re)build fixtures+manifest)
+Usage:  lua scripts/build-corpus.lua                   (resolve + write dataset)
+        lua scripts/build-corpus.lua --corpus          (also build representative fixtures)
+        lua scripts/build-corpus.lua --corpus --live   (REFRESH fixtures from real Google
+                                                        Lens — run from a residential
+                                                        connection; datacenter/VPN IPs are
+                                                        blocked by Google)
+Then `just accuracy` scores the (now real) fixtures offline; the saved lens/*.json
+and lens/raw/*.html are yours to inspect and diff.
 Requires: curl, and `lua build/build.lua --fetch-deps` (for dkjson).
 ------------------------------------------------------------------------------]]
 
@@ -33,8 +41,25 @@ local Identify = require 'Identify'
 local Taxonomy = require 'Taxonomy'
 local Lens = require 'ProviderGoogleLens'
 
-local DO_CORPUS = false
-for _, a in ipairs( arg ) do if a == '--corpus' then DO_CORPUS = true end end
+-- Flags:
+--   --corpus   (re)build the offline accuracy fixtures + manifest
+--   --live     capture REAL Google Lens output for each corpus image instead of
+--              the representative blob (run from a RESIDENTIAL connection — Google
+--              blocks datacenter/VPN IPs). Also dumps the raw HTML to
+--              spec/fixtures/lens/raw/ so you can audit that it's genuinely Google's.
+--   --images D where the photos live (default spec/fixtures/images)
+local DO_CORPUS, LIVE, IMAGES = false, false, 'spec/fixtures/images'
+do
+	local i = 1
+	while arg[ i ] do
+		local a = arg[ i ]
+		if a == '--corpus' then DO_CORPUS = true
+		elseif a == '--live' then LIVE = true
+		elseif a == '--images' then i = i + 1; IMAGES = arg[ i ] or IMAGES
+		elseif a:match( '^%-%-images=' ) then IMAGES = a:match( '=(.+)$' ) end
+		i = i + 1
+	end
+end
 
 --------------------------------------------------------------------------------
 -- Hand-curated labels from the @yuvalsaw IG captions (common name as written +
@@ -159,6 +184,35 @@ local function lensBlob( entries )
 		{ 'related searches', { 'wildlife', 'nature', 'ocean' } } }
 end
 
+-- Capture REAL Google Lens output for an image (runs the actual provider over a
+-- curl multipart upload, following the redirect like LrHttp does). Returns the
+-- extracted data, the raw HTML (for auditing), and an error string. Needs a
+-- residential connection — Google blocks datacenter/VPN IPs.
+local function captureLiveLens( imagePath )
+	local raw
+	local h = {
+		postMultipart = function( url, parts, headers )
+			local fs = ''
+			for _, p in ipairs( parts ) do
+				if p.filePath then
+					fs = fs .. ' -F ' .. shquote( p.name .. '=@' .. p.filePath ..
+						( p.contentType and ( ';type=' .. p.contentType ) or '' ) )
+				else
+					fs = fs .. ' -F ' .. shquote( p.name .. '=' .. p.value )
+				end
+			end
+			local hs = ''
+			for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
+			raw = run( 'curl -fsSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
+			return raw
+		end,
+	}
+	local decoded, err = Lens.fetch( { imageFile = imagePath, hl = 'en', country = 'us' }, { http = h } )
+	return decoded, raw, err
+end
+
+local function fileExists( p ) local f = io.open( p, 'rb' ); if f then f:close(); return true end return false end
+
 --------------------------------------------------------------------------------
 -- 1) resolve every gold entry through live GBIF; build the dataset
 
@@ -187,12 +241,10 @@ end
 -- One row per ANIMAL in the frame: the lead subject plus any `also` species, so
 -- multi-subject photos (e.g. the day octopus + lei triggerfish) are fully
 -- represented — matching the plugin, which tags every species over threshold.
-local nSubjects = 0
 for _, e in ipairs( GOLD ) do
 	local subjects = { { common = e.common, scientific = e.scientific } }
 	for _, a in ipairs( e.also or {} ) do subjects[ #subjects + 1 ] = a end
 	for _, s in ipairs( subjects ) do
-		nSubjects = nSubjects + 1
 		local row = resolveRow( e.image, s.common, s.scientific )
 		if row then
 			dataset[ #dataset + 1 ] = row
@@ -233,44 +285,71 @@ if not DO_CORPUS then
 	return
 end
 
-print( '\nBuilding offline corpus cases…' )
+print( ( '\nBuilding offline corpus cases (%s Lens output)…' ):format( LIVE and 'LIVE' or 'representative' ) )
 os.execute( 'mkdir -p ' .. FIX .. '/lens' )
+if LIVE then os.execute( 'mkdir -p ' .. FIX .. '/lens/raw' ) end
 local recHttp = httpAdapter( true )
 local manifestCases = {}
+
+-- expected = the GROUND TRUTH (every animal in the frame, from the dataset above),
+-- NOT the pipeline's prediction. So with --live the accuracy run measures real Lens
+-- against the truth (and may legitimately fall short); with the representative blob
+-- it passes by construction.
+local expectedByImage = {}
+for _, r in ipairs( dataset ) do
+	local e = expectedByImage[ r.image ] or {}
+	e[ #e + 1 ] = { common = r.common, scientific = r.scientific, genus = r.genus, family = r.family }
+	expectedByImage[ r.image ] = e
+end
 
 for _, e in ipairs( GOLD ) do
 	if e.corpus then
 		local entries = { { common = e.common, scientific = e.scientific } }
 		for _, a in ipairs( e.also or {} ) do entries[ #entries + 1 ] = a end
 		local caseId = e.id or slug( e.common )
+		local expected = expectedByImage[ e.image ] or {}
 
-		-- representative Lens blob
-		local blob = lensBlob( entries )
-		writeFile( FIX .. '/lens/' .. caseId .. '.json', json.encode( blob, { indent = true } ) )
-
-		-- run the real pipeline with a RECORDING adapter: captures the GBIF
-		-- fixtures the offline suite needs AND tells us the accepted names.
-		local obs = Lens.parse( blob )
-		local result = Identify.run( obs, {
-			resolve = function( c ) return Taxonomy.resolve( c, { http = recHttp, cache = {} } ) end,
-		} )
-
-		-- Ground truth = what the pipeline confidently recovers (= the gold species
-		-- for an authored representative blob; any false positive would show here
-		-- and in the accuracy run).
-		local expected = {}
-		for _, a in ipairs( result.confident ) do
-			expected[ #expected + 1 ] = { common = a.taxon.commonName,
-				scientific = a.taxon.scientificName, genus = a.taxon.genus, family = a.taxon.family }
-		end
-		if #expected ~= #entries then
-			io.stderr:write( ( '  ! case %q recovered %d confident taxa, expected %d\n' )
-				:format( caseId, #expected, #entries ) )
+		-- get the Lens response: real Google capture (--live) or representative blob
+		local blob, skip
+		if LIVE then
+			local path = IMAGES .. '/' .. e.image
+			if not fileExists( path ) then
+				io.stderr:write( ( '  ! %s: image not found at %s — skipping\n' ):format( caseId, path ) )
+				skip = true
+			else
+				local decoded, raw, ferr = captureLiveLens( path )
+				if not decoded then
+					io.stderr:write( ( '  ! %s: live Lens failed (%s) — skipping\n' ):format( caseId, tostring( ferr ) ) )
+					skip = true
+				else
+					blob = decoded
+					if raw then writeFile( FIX .. '/lens/raw/' .. caseId .. '.html', raw ) end
+				end
+			end
+		else
+			blob = lensBlob( entries )
 		end
 
-		manifestCases[ #manifestCases + 1 ] = { id = caseId .. '_lens', image = e.image,
-			provider = 'lens', response = 'lens/' .. caseId .. '.json', expected = expected }
-		print( ( '  %-28s recovered %d/%d' ):format( caseId, #expected, #entries ) )
+		if not skip then
+			writeFile( FIX .. '/lens/' .. caseId .. '.json', json.encode( blob, { indent = true } ) )
+
+			-- run the real pipeline with a RECORDING adapter: captures the GBIF
+			-- fixtures the offline suite replays.
+			local result = Identify.run( Lens.parse( blob ), {
+				resolve = function( c ) return Taxonomy.resolve( c, { http = recHttp, cache = {} } ) end,
+			} )
+
+			-- report how many ground-truth species this Lens response recovered
+			local got = {}
+			for _, a in ipairs( result.confident ) do got[ a.taxon.scientificName ] = true end
+			local found = 0
+			for _, x in ipairs( expected ) do if got[ x.scientific ] then found = found + 1 end end
+
+			manifestCases[ #manifestCases + 1 ] = { id = caseId .. '_lens', image = e.image,
+				provider = 'lens', response = 'lens/' .. caseId .. '.json', expected = expected }
+			print( ( '  %-28s recovered %d/%d  (%d confident)' ):format(
+				caseId, found, #expected, #result.confident ) )
+		end
 	end
 end
 

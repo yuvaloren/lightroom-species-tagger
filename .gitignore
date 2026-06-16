@@ -15,5 +15,9 @@ luacov.report.out
 !/spec/fixtures/images/.gitkeep
 !/spec/fixtures/images/README.md
 
+# Raw Google Lens HTML dumped by `build-corpus.lua --live` (for auditing the
+# captures) — large and may carry transient session tokens; never committed.
+/spec/fixtures/lens/raw/
+
 # macOS
 .DS_Store

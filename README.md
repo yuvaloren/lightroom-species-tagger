@@ -132,6 +132,29 @@ lua scripts/record-fixture.lua spec/fixtures/images/yourshot.jpg --provider lens
 # Lens needs a residential connection; for plants: PLANTNET_KEY=… --provider plantnet
 ```
 
+### Are the bundled Lens fixtures real?
+
+**No — by default they are *representative*, not live Google captures.** The GBIF
+fixtures are real, but the `spec/fixtures/lens/*.json` blobs are generated
+(`scripts/build-corpus.lua`'s `lensBlob`) — seeded with the correct species names
+plus noise — because Google blocks automated Lens access from datacenter/CI IPs.
+So the offline 100% number proves the **parser → GBIF → scorer pipeline** works on
+Lens-shaped input; it is **not** a measurement of real Google Lens recall.
+
+To measure (and verify) the real thing, refresh the fixtures from live Google Lens
+on a **residential** connection:
+
+```
+just refresh-fixtures          # = build-corpus.lua --corpus --live
+just accuracy                  # now scores the REAL captures against the ground truth
+```
+
+This overwrites each corpus `lens/*.json` with Google's actual output and saves
+Google's **raw HTML** to `spec/fixtures/lens/raw/<case>.html` so you can audit that
+the captures are genuinely Google's and that the parser extracts them faithfully
+(neither is committed). The `expected` labels stay the human ground truth, so the
+accuracy run can legitimately come in below 100% — that's the honest signal.
+
 ## Building & developing
 
 One self-contained script bootstraps a fresh machine (isolated, pinned Lua 5.1 +
