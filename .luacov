@@ -1,0 +1,5 @@
+-- luacov configuration: measure coverage of the shared modules only.
+return {
+	include = { 'src/shared/' },
+	exclude = { 'spec/', 'build/%.deps/', 'dkjson' },
+}

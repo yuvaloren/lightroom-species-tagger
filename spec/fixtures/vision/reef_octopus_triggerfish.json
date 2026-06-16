@@ -1,0 +1,21 @@
+{
+  "responses": [
+    {
+      "webDetection": {
+        "bestGuessLabels": [ { "label": "sufflamen bursa" } ],
+        "webEntities": [
+          { "entityId": "/m/0a1", "score": 1.82, "description": "Sufflamen bursa" },
+          { "entityId": "/m/0a2", "score": 1.20, "description": "Lei triggerfish" },
+          { "entityId": "/m/0a3", "score": 0.94, "description": "Octopus cyanea" },
+          { "entityId": "/m/0a4", "score": 0.71, "description": "Day octopus" },
+          { "entityId": "/m/0a5", "score": 0.55, "description": "Coral reef" },
+          { "entityId": "/m/0a6", "score": 0.40, "description": "Triggerfish" }
+        ],
+        "pagesWithMatchingImages": [
+          { "pageTitle": "Lei triggerfish (Sufflamen bursa) - Wikipedia", "url": "https://en.wikipedia.org/wiki/Sufflamen_bursa" },
+          { "pageTitle": "Day octopus (Octopus cyanea) - iNaturalist", "url": "https://www.inaturalist.org/taxa/Octopus-cyanea" }
+        ]
+      }
+    }
+  ]
+}

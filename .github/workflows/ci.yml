@@ -1,0 +1,92 @@
+name: CI
+
+on:
+  push:
+    branches: [ main ]
+    tags: [ 'v*' ]
+  pull_request:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write # for the release step on tags
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # git-cliff needs full history + tags
+
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1.5"
+
+      - uses: leafo/gh-actions-luarocks@v4
+
+      - name: Install Lua tooling
+        run: luarocks install luacheck && luarocks install busted && luarocks install luacov && luarocks install luafilesystem
+
+      - name: Fetch dependencies (pulls the pinned dkjson)
+        run: lua build/build.lua --fetch-deps
+
+      - name: Lint
+        run: luacheck src spec scripts
+
+      - name: Test
+        run: busted
+
+      - name: Accuracy report (offline fixture corpus)
+        run: lua scripts/accuracy.lua
+
+      - name: Coverage (report-only)
+        continue-on-error: true
+        run: |
+          busted --coverage
+          luacov
+          tail -n 30 luacov.report.out || true
+
+      - name: Version drift guard (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        run: |
+          TAG="${GITHUB_REF_NAME#v}"
+          FILE="$(tr -d '[:space:]' < VERSION)"
+          if [ "$TAG" != "$FILE" ]; then
+            echo "::error::git tag ($TAG) does not match VERSION file ($FILE)"; exit 1
+          fi
+          if ! grep -q "## \[$TAG\]" CHANGELOG.md; then
+            echo "::error::CHANGELOG.md has no '## [$TAG]' heading"; exit 1
+          fi
+          echo "version ok: $TAG"
+
+      - name: Build bundle
+        run: lua build/build.lua
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+
+      - name: Upload artifacts
+        uses: actions/upload-artifact@v4
+        with:
+          name: lrplugin
+          path: |
+            dist/*.zip
+            dist/checksums.txt
+
+      - name: Generate release notes (tags only)
+        id: cliff
+        if: startsWith(github.ref, 'refs/tags/v')
+        continue-on-error: true
+        uses: orhun/git-cliff-action@v4
+        with:
+          config: cliff.toml
+          args: --latest --strip all
+
+      - name: Release (tags only)
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          body: ${{ steps.cliff.outputs.content }}
+          generate_release_notes: true
+          files: |
+            dist/*.zip
+            dist/checksums.txt

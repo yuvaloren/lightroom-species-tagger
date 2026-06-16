@@ -1,0 +1,19 @@
+# Build output + pulled dependencies (never committed; pulled at build time)
+/dist/
+/build/.deps/
+
+# Pinned local Lua toolchain (created by scripts/dev-setup.sh)
+/.lua-env/
+
+# Test coverage artifacts
+luacov.stats.out
+luacov.report.out
+
+# Live test images are the user's own photos — never committed. Drop originals
+# into spec/fixtures/images/ to enable live recording / live accuracy runs.
+/spec/fixtures/images/*
+!/spec/fixtures/images/.gitkeep
+!/spec/fixtures/images/README.md
+
+# macOS
+.DS_Store
