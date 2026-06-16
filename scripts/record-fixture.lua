@@ -91,7 +91,9 @@ local http = {
 		end
 		local hs = ''
 		for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
-		return run( 'curl -fsSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
+		-- no -f: keep 4xx bodies so the provider can report a real reason (403 /
+		-- consent / Pl@ntNet error) instead of an empty "no response".
+		return run( 'curl -sSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
 	end,
 }
 

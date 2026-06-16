@@ -203,7 +203,10 @@ local function captureLiveLens( imagePath )
 			end
 			local hs = ''
 			for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
-			raw = run( 'curl -fsSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
+			-- NOTE: no -f, so we keep the body even on a 4xx (403/consent) page —
+			-- that lets the provider report WHY Google refused, and the raw dump
+			-- captures it for auditing.
+			raw = run( 'curl -sSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
 			return raw
 		end,
 	}
