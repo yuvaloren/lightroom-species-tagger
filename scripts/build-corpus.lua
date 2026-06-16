@@ -40,6 +40,18 @@ for _, a in ipairs( arg ) do if a == '--corpus' then DO_CORPUS = true end end
 -- Hand-curated labels from the @yuvalsaw IG captions (common name as written +
 -- the species it denotes). `corpus = true` marks the taxonomically-diverse
 -- subset that also gets an offline accuracy case. `image` is the export filename.
+-- `also` lists ADDITIONAL animals in the same frame (multi-subject photos) — each
+-- becomes its own ground-truth row, mirroring the plugin tagging every species.
+--
+-- Multi-animal frames audited from the captions + the images. Secondary subjects
+-- that cannot be resolved to a confident SPECIES are intentionally left out rather
+-- than guessed (ground truth must be correct, not just complete):
+--   18349712272246623 "anemone eating a starfish" — the starfish is engulfed/not
+--       visible; only the Urticina piscivora anemone is labelled.
+--   18102139598066261 "lingcod among metridium"  — the Metridium anemones are
+--       out-of-focus background and the caption gives only the genus; lingcod only.
+--   18123724987543504 "a little bird + African buffalo" — the bird is a small
+--       oxpecker, not resolvable to species from the frame; buffalo only.
 local GOLD = {
 	{ image = '18118084048758540.jpg', common = 'Spotfin porcupinefish', scientific = 'Diodon hystrix', corpus = true },
 	{ image = '18398736889152502.jpg', common = 'Spotted linckia',        scientific = 'Linckia multifora', corpus = true },
@@ -150,34 +162,46 @@ end
 --------------------------------------------------------------------------------
 -- 1) resolve every gold entry through live GBIF; build the dataset
 
-print( 'Resolving ' .. #GOLD .. ' species through GBIF…' )
 local resolveHttp = httpAdapter( false )
 local dataset = {}
 
-local function resolveOne( e )
+-- Resolve one (image, common, scientific) subject into a dataset row. The common
+-- name is the photographer's own label — the authoritative ground truth; GBIF
+-- only supplies the accepted scientific name + classification (NOT the colloquial
+-- name, whose "first English vernacular" is often an obscure one e.g.
+-- "Cyane's octopus" for Octopus cyanea).
+local function resolveRow( image, common, scientific )
 	local deps = { http = resolveHttp, cache = {} }
-	local t = Taxonomy.matchScientific( e.scientific, deps )
+	local t = Taxonomy.matchScientific( scientific, deps )
 	if not t then
-		io.stderr:write( ( '  ! GBIF did not match %q (from "%s")\n' ):format( e.scientific, e.common ) )
+		io.stderr:write( ( '  ! GBIF did not match %q (from "%s")\n' ):format( scientific, common ) )
 		return nil
 	end
-	local commonName = t.commonName or Taxonomy.vernacularEnglish( t.usageKey, deps ) or e.common
 	return {
-		image = e.image, captionCommon = e.common,
-		common = commonName, scientific = t.scientificName,
+		image = image, common = common, scientific = t.scientificName,
 		genus = t.genus, family = t.family, order = t.order,
 		class = t.class, phylum = t.phylum, kingdom = t.kingdom,
 	}
 end
 
+-- One row per ANIMAL in the frame: the lead subject plus any `also` species, so
+-- multi-subject photos (e.g. the day octopus + lei triggerfish) are fully
+-- represented — matching the plugin, which tags every species over threshold.
+local nSubjects = 0
 for _, e in ipairs( GOLD ) do
-	local row = resolveOne( e )
-	if row then
-		dataset[ #dataset + 1 ] = row
-		print( ( '  %-26s -> %-26s %s / %s' ):format(
-			e.common, row.scientific, row.genus or '?', row.family or '?' ) )
+	local subjects = { { common = e.common, scientific = e.scientific } }
+	for _, a in ipairs( e.also or {} ) do subjects[ #subjects + 1 ] = a end
+	for _, s in ipairs( subjects ) do
+		nSubjects = nSubjects + 1
+		local row = resolveRow( e.image, s.common, s.scientific )
+		if row then
+			dataset[ #dataset + 1 ] = row
+			print( ( '  %-26s -> %-26s %s / %s' ):format(
+				s.common, row.scientific, row.genus or '?', row.family or '?' ) )
+		end
 	end
 end
+print( ( 'Resolved %d subjects across %d photos.' ):format( #dataset, #GOLD ) )
 
 -- write the dataset
 local function lua_q( s ) return ( '%q' ):format( s or '' ) end
