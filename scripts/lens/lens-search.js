@@ -27,11 +27,12 @@ only the single stdout JSON line, so these never affect a normal run):
                     strings-sources.json (each scraped string + the page region it
                     came from, with which were excluded as noise), result.json.
                     Debug also goes to stderr.
-  LENS_KEEP_OPEN=1  (headed) leave the window open for inspection until Ctrl-C
+  LENS_KEEP_OPEN=1  leave a detached Chrome window open for inspection afterwards
+                    (node still exits, so callers don't hang — close it yourself)
   LENS_SLOWMO=<ms>  slow Puppeteer actions so you can watch
 The ./debug-lens.sh wrapper sets all of these for you.
 ----------------------------------------------------------------------------*/
-const { execSync } = require('child_process');
+const { execSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
@@ -118,16 +119,42 @@ const dbgWrite = (name, content) => {
 
   let browser;
   try {
-    browser = await puppeteer.launch({
-      executablePath: CHROME,
-      headless: HEADED ? false : 'new',
-      slowMo: SLOWMO,
-      dumpio: DEBUG,
-      defaultViewport: HEADED ? null : undefined,
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US',
-        ...(HEADED ? ['--start-maximized'] : [])],
-    });
-    const page = await browser.newPage();
+    if (KEEPOPEN) {
+      // Keep-open: launch a visible Chrome we DON'T own (detached + connect), so it
+      // stays open for inspection after this script exits. puppeteer only kills
+      // browsers it *launched*, never ones it connect()s to, so node can exit
+      // cleanly (the caller — e.g. the Lightroom action — doesn't hang) while the
+      // window lives on. Its own --user-data-dir keeps it independent of your Chrome.
+      const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-chrome-'));
+      const proc = spawn(CHROME, ['--remote-debugging-port=0', '--user-data-dir=' + udd,
+        '--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled',
+        '--lang=en-US', '--start-maximized', 'about:blank'], { detached: true, stdio: 'ignore' });
+      proc.unref();
+      const portFile = path.join(udd, 'DevToolsActivePort');
+      let endpoint;
+      for (let i = 0; i < 100 && !endpoint; i++) {
+        if (fs.existsSync(portFile)) {
+          const p = fs.readFileSync(portFile, 'utf8').split('\n');
+          if (p[0] && p[0].trim()) endpoint = 'http://127.0.0.1:' + p[0].trim();
+        }
+        if (!endpoint) await sleep(100);
+      }
+      if (!endpoint) fail('debug: could not start a visible Chrome (no DevToolsActivePort)');
+      browser = await puppeteer.connect({ browserURL: endpoint, defaultViewport: null });
+      dbg('keep-open: connected to a detached Chrome window —', endpoint);
+    } else {
+      browser = await puppeteer.launch({
+        executablePath: CHROME,
+        headless: HEADED ? false : 'new',
+        slowMo: SLOWMO,
+        dumpio: DEBUG,
+        defaultViewport: HEADED ? null : undefined,
+        args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US',
+          ...(HEADED ? ['--start-maximized'] : [])],
+      });
+    }
+    const existingPages = KEEPOPEN ? await browser.pages() : [];
+    const page = existingPages.length ? existingPages[0] : await browser.newPage();
     await page.setUserAgent(UA);
     if (!HEADED) await page.setViewport({ width: 1280, height: 1200 });
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
@@ -229,15 +256,12 @@ const dbgWrite = (name, content) => {
       const dropped = (data.sources || []).filter(s => s.excluded).length;
       dbg('scraped ' + clean.length + ' strings; excluded ' + dropped + ' from noise regions; AI overview ' + (result.overview ? 'present' : 'EMPTY'));
     }
-    if (KEEPOPEN) {
-      console.log(JSON.stringify(result));
-      console.error('DEBUG: browser left open — compare the results URL in your own Chrome; Ctrl-C to exit.');
-      await new Promise(() => {});
-    }
-    out(result);
+    if (KEEPOPEN) console.error('DEBUG: Chrome window left open for inspection — close it when done.');
+    out(result); // prints the JSON line and exits; a keep-open (connected) browser is NOT killed
   } catch (e) {
     fail('render failed: ' + e.message);
   } finally {
-    if (browser) await browser.close();
+    // Only close browsers we launched; a keep-open window is connected, so leave it.
+    if (browser && !KEEPOPEN) { try { await browser.close(); } catch (_) {} }
   }
 })();

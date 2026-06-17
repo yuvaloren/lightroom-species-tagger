@@ -130,7 +130,9 @@ local function photoPlace( photo )
 	return table.concat( parts, ', ' )
 end
 
-local function observe( photo, cfg, deps )
+-- Exposed (M.observe) so the "Debug Lens" action can reuse the EXACT render +
+-- upload path a normal tagging run uses, just with a debug-enabled lensSearch.
+function M.observe( photo, cfg, deps )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
 
@@ -150,6 +152,10 @@ local function observe( photo, cfg, deps )
 
 	local obs, oerr = provider.identify( opts, deps )
 	if file then LrFileUtils.delete( file ) end
+	-- Providers signal failure as ({}, err) (empty list + message). Normalise that to
+	-- nil-on-error here so every caller's `if not obs` guard catches real failures
+	-- (otherwise an empty table is truthy and the error is silently swallowed).
+	if oerr and oerr ~= '' then return nil, oerr end
 	return obs, oerr
 end
 
@@ -200,7 +206,7 @@ function M.run( _ )
 		progress:setPortionComplete( i - 1, #photos )
 		progress:setCaption( fileName( photo ) )
 
-		local obs, err = observe( photo, cfg, providerDeps )
+		local obs, err = M.observe( photo, cfg, providerDeps )
 		if not obs then
 			nError = nError + 1
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )

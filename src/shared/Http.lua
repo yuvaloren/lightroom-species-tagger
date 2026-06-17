@@ -57,6 +57,9 @@ function M.lensSearchAdapter( opts )
 	local json = require 'dkjson'
 	opts = opts or {}
 	local helper = opts.helperPath
+	-- When set (the in-app "Debug Lens" action), run a VISIBLE Chrome and keep the
+	-- helper's artifacts + stderr in this dir; otherwise headless, stderr discarded.
+	local debugDir = opts.debugDir
 
 	local function sh( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
 	local function exists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
@@ -77,7 +80,16 @@ function M.lensSearchAdapter( opts )
 		local loc = ''
 		if lat and lng then loc = ' ' .. tostring( lat ) .. ' ' .. tostring( lng )
 		elseif place and place ~= '' then loc = ' ' .. sh( place ) end
-		local cmd = node .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. loc .. ' > ' .. sh( out ) .. ' 2>/dev/null'
+		local envp, errRedir = '', '2>/dev/null'
+		if debugDir and debugDir ~= '' then
+			LrFileUtils.createAllDirectories( debugDir )
+			-- headed + keep-open so a Chrome window stays open for inspection (the helper
+			-- launches it detached + exits, so this call still returns and nothing hangs).
+			envp = 'LENS_HEADED=1 LENS_DEBUG=1 LENS_KEEP_OPEN=1 LENS_DEBUG_DIR=' .. sh( debugDir ) .. ' '
+			errRedir = '2> ' .. sh( LrPathUtils.child( debugDir, 'helper-stderr.log' ) )
+		end
+		local cmd = envp .. sh( node ) .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. loc ..
+			' > ' .. sh( out ) .. ' ' .. errRedir
 		LrTasks.execute( cmd )
 		local f = io.open( out, 'rb' )
 		local body = f and f:read( '*a' )

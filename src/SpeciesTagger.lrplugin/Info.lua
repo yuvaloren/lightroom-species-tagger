@@ -20,6 +20,10 @@ return {
 			title = LOC '$$$/SpeciesTagger/Menu=Identify and Tag Species…',
 			file = 'SpeciesTaggerMenuItem.lua',
 		},
+		{
+			title = LOC '$$$/SpeciesTagger/DebugMenu=Debug Lens on Selected Photo (headed)…',
+			file = 'SpeciesTaggerDebugMenuItem.lua',
+		},
 	},
 
 	VERSION = { major = 0, minor = 1, revision = 0, build = 0 },

@@ -205,14 +205,20 @@ just check       # lint + test + build (run before pushing)
 ### Troubleshooting a wrong identification
 
 When Lens tags something obviously wrong, watch the actual exchange with a visible
-Chrome window:
+Chrome window. From **inside Lightroom**, select the photo and run **Library >
+Plug-in Extras > "Debug Lens on Selected Photo (headed)…"**: it runs the same
+upload Lightroom would, opens Chrome so you can watch, reveals the artifacts folder
+(`~/Desktop/SpeciesTagger-debug/<photo>-<time>/`) in Finder, and shows what Lens
+returned and how it would be scored.
+
+From a **terminal** (same thing, against an exported JPEG):
 
 ```
 ./debug-lens.sh /path/to/photo.jpg                    # or add "City, State" / lat lng
 ```
 
-It opens Chrome on the real Lens results page and writes artifacts to
-`/tmp/lens-debug/` (override with `LENS_DEBUG_DIR`):
+Either way it opens Chrome on the real Lens results page and writes artifacts
+(terminal default `/tmp/lens-debug/`, override with `LENS_DEBUG_DIR`):
 
 | artifact | what it tells you |
 | --- | --- |

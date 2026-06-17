@@ -8,8 +8,8 @@
 #   ./debug-lens.sh <image.jpg> "Monterey, California"   # place name (geocoded)
 #
 # Export the SAME photo Lightroom would send (a ~1024px-long-edge JPEG) and pass it
-# here. Artifacts land in LENS_DEBUG_DIR (default /tmp/lens-debug); the window stays
-# open until you press Ctrl-C.
+# here. Artifacts land in LENS_DEBUG_DIR (default /tmp/lens-debug). A detached Chrome
+# window is left open for inspection (this command returns; close the window when done).
 set -euo pipefail
 
 cd "$(dirname "$0")"
@@ -22,7 +22,8 @@ echo "==> headed Lens debug run"
 echo "    image:     $img"
 echo "    artifacts: $dir/{results-url.txt,uploaded.jpg,page.png,page.html,strings-sources.json,result.json}"
 echo "    Watch the window: is the UPLOADED image your photo, and do the matches look right?"
-echo "    Then open results-url.txt in your own logged-in Chrome to compare. Ctrl-C to close."
+echo "    The window stays open after this returns — close it when done. Compare against"
+echo "    results-url.txt opened in your own logged-in Chrome."
 echo
 
 LENS_HEADED=1 LENS_DEBUG=1 LENS_SLOWMO=250 LENS_KEEP_OPEN=1 LENS_DEBUG_DIR="$dir" \
