@@ -70,25 +70,43 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
     await page.setCookie(...cookies);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
-    for (let i = 0; i < 12; i++) {
-      const n = await page.evaluate(() => document.querySelectorAll('a[href]').length).catch(() => 0);
-      if (n > 40) break;
+    // wait for the matches AND (if Google is going to show one) the AI Overview,
+    // which renders a beat later and is the strongest signal.
+    for (let i = 0; i < 15; i++) {
+      const r = await page.evaluate(() => ({
+        anchors: document.querySelectorAll('a[href]').length,
+        ai: /AI Overview/i.test(document.body ? document.body.innerText : ''),
+      })).catch(() => ({ anchors: 0, ai: false }));
+      if (r.anchors > 40 && r.ai) break;
+      if (r.anchors > 40 && i >= 6) break; // no AI overview coming; proceed
       await sleep(1000);
     }
-    let strings = await page.evaluate(() => {
+    const data = await page.evaluate(() => {
       const out = [];
-      const push = t => { t = (t || '').replace(/\s+/g, ' ').trim(); if (t.length >= 4 && t.length <= 160 && /[a-z]/.test(t)) out.push(t); };
+      const push = t => { t = (t || '').replace(/\s+/g, ' ').trim(); if (t.length >= 4 && t.length <= 200 && /[a-z]/.test(t)) out.push(t); };
       document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(e => push(e.innerText));
       document.querySelectorAll('a[href]').forEach(a => { const t = a.innerText; if (t && t.split(' ').length <= 14) push(t); });
-      (document.body ? document.body.innerText : '').split('\n').forEach(line => {
-        if (/[A-Z][a-z]+ [a-z]{3,}/.test(line)) push(line); // lines containing a possible binomial
-      });
-      return out;
+      const lines = (document.body ? document.body.innerText : '').split('\n').map(s => s.trim());
+      lines.forEach(line => { if (/[A-Z][a-z]+ [a-z]{3,}/.test(line)) push(line); });
+
+      // The "AI Overview" block is Google's single authoritative answer (it names
+      // the species + binomial). Grab the prose lines right after that heading.
+      const overview = [];
+      const i = lines.findIndex(l => /^AI Overview$/i.test(l));
+      if (i >= 0) {
+        for (let j = i + 1; j < lines.length && overview.length < 8; j++) {
+          const l = lines[j];
+          if (!l) { if (overview.length) break; else continue; }
+          if (/^(Show more|Visual matches|Related searches|People also|From sources|Feedback|Search Results|All|Exact matches|About this image)/i.test(l)) break;
+          if (l.length > 250) break;
+          overview.push(l);
+        }
+      }
+      return { strings: out, overview: overview.join(' ') };
     });
-    // dedupe + drop UI chrome
     const seen = new Set(); const clean = [];
-    for (const s of strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
-    out({ ok: true, count: clean.length, strings: clean.slice(0, 80) });
+    for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
+    out({ ok: true, count: clean.length, overview: data.overview || '', strings: clean.slice(0, 80) });
   } catch (e) {
     fail('render failed: ' + e.message);
   } finally {

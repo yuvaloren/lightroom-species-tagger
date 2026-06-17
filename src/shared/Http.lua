@@ -86,7 +86,7 @@ function M.lensSearchAdapter( opts )
 		if type( d ) ~= 'table' or not d.ok then
 			return nil, 'Google Lens: ' .. ( d and tostring( d.error ) or 'helper error' )
 		end
-		return d.strings
+		return { overview = d.overview, strings = d.strings }
 	end
 end
 

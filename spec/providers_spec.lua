@@ -60,17 +60,28 @@ describe( 'ProviderGoogleLens', function()
 		assert.is_false( Lens._isCandidate( 'a' ) )
 	end )
 
-	it( 'identify() harvests observations from the injected browser helper', function()
+	it( 'identify() weights the AI Overview high and harvests match titles low', function()
 		local helper = function( file )
 			assert.equal( '/tmp/x.jpg', file )
-			return { 'Day octopus (Octopus cyanea) - Wikipedia', 'Lei triggerfish, Sufflamen bursa',
-				'https://en.wikipedia.org/wiki/Octopus_cyanea', 'AI Overview' }
+			return {
+				overview = 'The fish pictured is a Giant Frogfish (Antennarius commerson).',
+				strings = { 'Frogfish - Wikipedia', 'https://en.wikipedia.org/wiki/Frogfish', 'Reef life' },
+			}
 		end
 		local obs, err = Lens.identify( { imageFile = '/tmp/x.jpg' }, { lensSearch = helper } )
 		assert.is_nil( err )
+		local ai = find( obs, 'The fish pictured is a Giant Frogfish (Antennarius commerson).' )
+		assert.is_truthy( ai )
+		assert.equal( 'label', ai.kind )
+		assert.is_true( ai.weight >= 1.5 )                         -- AI Overview is the strong signal
+		assert.is_truthy( find( obs, 'Frogfish - Wikipedia' ) )    -- titles harvested too
+		assert.is_nil( find( obs, 'https://en.wikipedia.org/wiki/Frogfish' ) ) -- URL dropped
+	end )
+
+	it( 'parse() also accepts a plain string list (representative fixtures)', function()
+		local obs = Lens.parse { 'Day octopus (Octopus cyanea) - Wikipedia', 'https://x/y' }
 		assert.is_truthy( find( obs, 'Day octopus (Octopus cyanea) - Wikipedia' ) )
-		assert.is_truthy( find( obs, 'Lei triggerfish, Sufflamen bursa' ) )
-		assert.is_nil( find( obs, 'https://en.wikipedia.org/wiki/Octopus_cyanea' ) ) -- URL dropped
+		assert.is_nil( find( obs, 'https://x/y' ) )
 	end )
 
 	it( 'identify() surfaces the helper error and never crashes', function()

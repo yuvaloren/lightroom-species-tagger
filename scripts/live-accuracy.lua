@@ -56,7 +56,7 @@ local function lensSearch( imageFile )
 	local d = raw and raw ~= '' and json.decode( raw )
 	if type( d ) ~= 'table' then return nil, 'helper: no/!bad output (run `cd scripts/lens && npm i`?)' end
 	if not d.ok then return nil, 'helper: ' .. tostring( d.error ) end
-	return d.strings
+	return { overview = d.overview, strings = d.strings }
 end
 
 -- group ground truth by image

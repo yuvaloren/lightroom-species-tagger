@@ -75,12 +75,24 @@ local function harvest( decoded )
 end
 M._harvest = harvest
 
--- parse( strings ) -> observations[]   (strings = the helper's match strings)
-function M.parse( strings )
+-- parse( decoded ) -> observations[]
+--   decoded may be the helper's result table { overview = <string>, strings = {…} }
+--   or a plain list of strings (representative fixtures / tests).
+-- Google's "AI Overview" is its single authoritative answer (it names the species
+-- and usually the binomial), so it's emitted as a strong 'label'; the visual-match
+-- titles are noisy supporting signal at low weight. Precision stays the job of the
+-- downstream binomial-detection + GBIF gating + scorer.
+function M.parse( decoded )
 	local obs = {}
-	if type( strings ) ~= 'table' then return obs end
+	if type( decoded ) ~= 'table' then return obs end
+	local overview = ( type( decoded.overview ) == 'string' ) and decoded.overview or nil
+	local list = decoded.strings or decoded
+
+	if overview and overview ~= '' then
+		obs[ #obs + 1 ] = { text = overview, kind = 'label', weight = 2.0, source = 'lens:ai' }
+	end
 	local MAX = 40 -- bound the candidate count (each may become a GBIF lookup downstream)
-	for i, text in ipairs( harvest( strings ) ) do
+	for i, text in ipairs( harvest( list ) ) do
 		if i > MAX then break end
 		obs[ #obs + 1 ] = { text = text, kind = 'title', weight = 0.5, source = 'lens:web' }
 	end

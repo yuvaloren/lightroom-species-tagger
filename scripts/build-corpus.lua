@@ -206,7 +206,7 @@ local function captureLiveLens( imagePath )
 	if type( decoded.strings ) ~= 'table' or #decoded.strings == 0 then
 		return nil, raw, 'lens helper: no match strings'
 	end
-	return decoded.strings, raw, nil
+	return { overview = decoded.overview, strings = decoded.strings }, raw, nil
 end
 
 --------------------------------------------------------------------------------
