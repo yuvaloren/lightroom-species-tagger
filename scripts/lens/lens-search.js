@@ -26,6 +26,11 @@ const puppeteer = require('puppeteer-core');
 const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
 const img = process.argv[2];
+// optional photo location: node lens-search.js <image> [lat] [lng] — gives Lens
+// geographic context so it favours species that occur there.
+const lat = parseFloat(process.argv[3]);
+const lng = parseFloat(process.argv[4]);
+const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
@@ -68,6 +73,12 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
     await page.setUserAgent(UA);
     await page.setViewport({ width: 1280, height: 1200 });
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
+    if (hasGeo) {
+      try {
+        await browser.defaultBrowserContext().overridePermissions('https://www.google.com', ['geolocation']);
+        await page.setGeolocation({ latitude: lat, longitude: lng });
+      } catch (_) {}
+    }
     await page.setCookie(...cookies);
     await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
     // wait for the matches AND (if Google is going to show one) the AI Overview,

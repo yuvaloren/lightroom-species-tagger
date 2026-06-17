@@ -104,13 +104,14 @@ end
 
 -- identify( opts, deps ) -> observations[], err
 --   opts.imageFile : path to the (downsized) JPEG
---   deps.lensSearch( imageFile ) -> strings[]|nil, err   (the browser helper)
+--   opts.lat/opts.lng : optional capture location (helps Lens favour local species)
+--   deps.lensSearch( imageFile, lat, lng ) -> strings[]|nil, err   (the browser helper)
 function M.identify( opts, deps )
 	if type( deps.lensSearch ) ~= 'function' then
 		return {}, 'Google Lens needs the browser helper (deps.lensSearch) — see scripts/lens'
 	end
 	if not opts.imageFile then return {}, 'Google Lens needs an image file (opts.imageFile)' end
-	local strings, err = deps.lensSearch( opts.imageFile )
+	local strings, err = deps.lensSearch( opts.imageFile, opts.lat, opts.lng )
 	if not strings then return {}, err or 'Google Lens returned nothing' end
 	return M.parse( strings )
 end

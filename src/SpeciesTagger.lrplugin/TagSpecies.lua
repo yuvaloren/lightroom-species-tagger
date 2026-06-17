@@ -108,6 +108,16 @@ end
 -- Get observations for one photo from the configured provider. Vision sends the
 -- bytes inline; Lens and Pl@ntNet upload them as a multipart file, so those need
 -- a temp JPEG on disk (cleaned up afterwards).
+-- Capture GPS from the catalog (the rendered preview has no EXIF), so Lens can
+-- favour species that occur where the photo was actually taken.
+local function photoGps( photo )
+	local ok, gps = pcall( function() return photo:getRawMetadata( 'gps' ) end )
+	if ok and type( gps ) == 'table' and gps.latitude and gps.longitude then
+		return gps.latitude, gps.longitude
+	end
+	return nil
+end
+
 local function observe( photo, cfg, deps )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
@@ -120,7 +130,10 @@ local function observe( photo, cfg, deps )
 		if not file then return nil, 'temp file: ' .. tostring( werr ) end
 	end
 
-	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), deps )
+	local opts = optsFor( cfg.backend, cfg, bytes, file )
+	if cfg.backend == 'lens' then opts.lat, opts.lng = photoGps( photo ) end
+
+	local obs, oerr = provider.identify( opts, deps )
 	if file then LrFileUtils.delete( file ) end
 	return obs, oerr
 end

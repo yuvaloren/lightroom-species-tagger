@@ -25,9 +25,9 @@ local Identify = require 'Identify'
 local Taxonomy = require 'Taxonomy'
 local Lens = require 'ProviderGoogleLens'
 local harness = require 'support.harness'
-local groundtruth = require 'fixtures.groundtruth.yuvalsaw'
 
-local opts = { images = 'spec/fixtures/images', limit = nil, throttle = 0 }
+local opts = { images = 'spec/fixtures/images', limit = nil, throttle = 0,
+	groundtruth = 'fixtures.groundtruth.yuvalsaw' }
 do
 	local i = 1
 	while arg[ i ] do
@@ -35,13 +35,16 @@ do
 		if a == '--images' then i = i + 1; opts.images = arg[ i ]
 		elseif a == '--limit' then i = i + 1; opts.limit = tonumber( arg[ i ] )
 		elseif a == '--throttle' then i = i + 1; opts.throttle = tonumber( arg[ i ] ) or 0
+		elseif a == '--groundtruth' then i = i + 1; opts.groundtruth = arg[ i ]
 		elseif a:match( '^%-%-images=' ) then opts.images = a:match( '=(.+)$' )
 		elseif a:match( '^%-%-limit=' ) then opts.limit = tonumber( a:match( '=(.+)$' ) )
 		elseif a:match( '^%-%-throttle=' ) then opts.throttle = tonumber( a:match( '=(.+)$' ) ) or 0
+		elseif a:match( '^%-%-groundtruth=' ) then opts.groundtruth = a:match( '=(.+)$' )
 		end
 		i = i + 1
 	end
 end
+local groundtruth = require( opts.groundtruth )
 
 local function shquote( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
 local function run( cmd ) local h = io.popen( cmd ); local o = h:read( '*a' ); h:close(); return o end
@@ -50,21 +53,24 @@ local function fileExists( p ) local f = io.open( p, 'rb' ); if f then f:close()
 -- live GBIF over curl (no recording — pure measurement)
 local http = { get = function( url ) return run( 'curl -fsS ' .. shquote( url ) .. ' 2>/dev/null' ) end }
 
--- the browser helper -> match strings
-local function lensSearch( imageFile )
-	local raw = run( 'node ' .. shquote( 'scripts/lens/lens-search.js' ) .. ' ' .. shquote( imageFile ) .. ' 2>/dev/null' )
+-- the browser helper -> match strings (with optional photo location for context)
+local function lensSearch( imageFile, lat, lng )
+	local cmd = 'node ' .. shquote( 'scripts/lens/lens-search.js' ) .. ' ' .. shquote( imageFile )
+	if lat and lng then cmd = cmd .. ' ' .. tostring( lat ) .. ' ' .. tostring( lng ) end
+	local raw = run( cmd .. ' 2>/dev/null' )
 	local d = raw and raw ~= '' and json.decode( raw )
 	if type( d ) ~= 'table' then return nil, 'helper: no/!bad output (run `cd scripts/lens && npm i`?)' end
 	if not d.ok then return nil, 'helper: ' .. tostring( d.error ) end
 	return { overview = d.overview, strings = d.strings }
 end
 
--- group ground truth by image
-local byImage, order = {}, {}
+-- group ground truth by image (carry each image's location for Lens context)
+local byImage, geo, order = {}, {}, {}
 for _, r in ipairs( groundtruth ) do
 	if not byImage[ r.image ] then byImage[ r.image ] = {}; order[ #order + 1 ] = r.image end
 	local e = byImage[ r.image ]
 	e[ #e + 1 ] = { common = r.common, scientific = r.scientific, genus = r.genus, family = r.family }
+	if r.lat and r.lng then geo[ r.image ] = { r.lat, r.lng } end
 end
 
 print( 'LIVE Google Lens accuracy (real captures; nothing is written)' )
@@ -82,7 +88,8 @@ for _, image in ipairs( order ) do
 		print( string.format( '%-22s  (not in %s)', image:sub( 1, 22 ), opts.images ) )
 	else
 		if tested > 0 and opts.throttle > 0 then os.execute( 'sleep ' .. tonumber( opts.throttle ) ) end
-		local strings, err = lensSearch( path )
+		local g = geo[ image ]
+		local strings, err = lensSearch( path, g and g[ 1 ], g and g[ 2 ] )
 		tested = tested + 1
 		if not strings then
 			print( string.format( '%-22s %-7s %-7s %-7s %-7s %-7s %s', image:sub( 1, 22 ), '-', '-', '-', '-', '-', err ) )
