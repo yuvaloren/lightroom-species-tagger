@@ -184,34 +184,60 @@ local function lensBlob( entries )
 		{ 'related searches', { 'wildlife', 'nature', 'ocean' } } }
 end
 
--- Capture REAL Google Lens output for an image (runs the actual provider over a
--- curl multipart upload, following the redirect like LrHttp does). Returns the
--- extracted data, the raw HTML (for auditing), and an error string. Needs a
--- residential connection — Google blocks datacenter/VPN IPs.
+-- Capture REAL Google Lens output for an image by reproducing a Chrome
+-- "Search image with Google Lens" request as faithfully as a CLI can:
+--   1. pre-seed the consent cookie, then bootstrap real Google cookies (AEC/NID/…)
+--      from a GET to google.com;
+--   2. POST the image to lens.google.com/v3/upload and FOLLOW the redirect to the
+--      results page WITH the same cookie jar — so the session that uploaded the
+--      image is the one that reads the results. (Without the shared jar Google
+--      replies "the image … is not associated with your account / re-upload".)
+-- Returns (decoded, rawHtml, err). Run from a residential connection.
+local UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' ..
+	'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.6478.127 Safari/537.36'
+-- Chrome request headers (Client Hints + fetch metadata + accept).
+local CHROME_H = table.concat( {
+	' -H ' .. shquote( 'sec-ch-ua: "Chromium";v="126", "Google Chrome";v="126", "Not.A/Brand";v="24"' ),
+	' -H ' .. shquote( 'sec-ch-ua-mobile: ?0' ),
+	' -H ' .. shquote( 'sec-ch-ua-platform: "macOS"' ),
+	' -H ' .. shquote( 'Accept-Language: en-US,en;q=0.9' ),
+	' -H ' .. shquote( 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,image/avif,image/webp,image/apng,*/*;q=0.8,application/signed-exchange;v=b3;q=0.7' ),
+	' -H ' .. shquote( 'sec-fetch-dest: document' ),
+	' -H ' .. shquote( 'sec-fetch-mode: navigate' ),
+	' -H ' .. shquote( 'sec-fetch-user: ?1' ),
+	' -H ' .. shquote( 'upgrade-insecure-requests: 1' ),
+}, '' )
+
 local function captureLiveLens( imagePath )
-	local raw
-	local h = {
-		postMultipart = function( url, parts, headers )
-			local fs = ''
-			for _, p in ipairs( parts ) do
-				if p.filePath then
-					fs = fs .. ' -F ' .. shquote( p.name .. '=@' .. p.filePath ..
-						( p.contentType and ( ';type=' .. p.contentType ) or '' ) )
-				else
-					fs = fs .. ' -F ' .. shquote( p.name .. '=' .. p.value )
-				end
-			end
-			local hs = ''
-			for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
-			-- NOTE: no -f, so we keep the body even on a 4xx (403/consent) page —
-			-- that lets the provider report WHY Google refused, and the raw dump
-			-- captures it for auditing.
-			raw = run( 'curl -sSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
-			return raw
-		end,
-	}
-	local decoded, err = Lens.fetch( { imageFile = imagePath, hl = 'en', country = 'us' }, { http = h } )
-	return decoded, raw, err
+	local jar = os.tmpname()
+	local jf = io.open( jar, 'w' )
+	jf:write( '# Netscape HTTP Cookie File\n' )
+	jf:write( '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' )
+	jf:write( '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n' )
+	jf:close()
+	local jarArgs = ' -c ' .. shquote( jar ) .. ' -b ' .. shquote( jar )
+	local base = 'curl -sS --compressed -A ' .. shquote( UA ) .. CHROME_H .. jarArgs
+
+	-- 1) load the Lens page itself (this is what you paste into) to establish the
+	--    lens.google.com session + cookies, exactly like opening lens.google.com.
+	run( base .. ' -H ' .. shquote( 'sec-fetch-site: none' ) ..
+		' -o /dev/null ' .. shquote( 'https://lens.google.com/' ) .. ' 2>/dev/null' )
+	-- 2) "paste": POST the image to the Lens upload endpoint from the Lens page
+	--    (Origin/Referer = lens.google.com), then follow the results redirect in the
+	--    SAME session/jar so the upload is associated with it.
+	local raw = run( base .. ' -L' ..
+		' -H ' .. shquote( 'sec-fetch-site: same-origin' ) ..
+		' -H ' .. shquote( 'Origin: https://lens.google.com' ) ..
+		' -H ' .. shquote( 'Referer: https://lens.google.com/' ) ..
+		' -F ' .. shquote( 'encoded_image=@' .. imagePath .. ';type=image/jpeg' ) ..
+		' ' .. shquote( 'https://lens.google.com/v3/upload?hl=en-US&gl=US&ep=ccm&re=df&st=1' ) .. ' 2>/dev/null' )
+	os.remove( jar )
+
+	local reason = Lens._test.blockReason( raw )
+	if reason then return nil, raw, reason end
+	local decoded = Lens.extractData( raw )
+	if not decoded then return nil, raw, 'no parseable Lens results (blocked, not-associated, or layout changed)' end
+	return decoded, raw, nil
 end
 
 local function fileExists( p ) local f = io.open( p, 'rb' ); if f then f:close(); return true end return false end
