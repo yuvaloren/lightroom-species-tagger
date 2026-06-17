@@ -17,10 +17,24 @@ recall-oriented and tolerant of noise.
 
 Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core).
 Override Chrome with LENS_CHROME=/path/to/chrome. Run from a residential network.
-Usage: node lens-search.js <image.jpg>
+Usage: node lens-search.js <image.jpg> [lat lng | "City, State, Country"]
+
+Troubleshooting (opt-in via env; the plugin pipes stderr to /dev/null and reads
+only the single stdout JSON line, so these never affect a normal run):
+  LENS_HEADED=1     show a real Chrome window (implies LENS_DEBUG=1)
+  LENS_DEBUG=1      write artifacts to LENS_DEBUG_DIR (default $TMPDIR/lens-debug):
+                    results-url.txt, uploaded.jpg, page.png, page.html,
+                    strings-sources.json (each scraped string + the page region it
+                    came from, with which were excluded as noise), result.json.
+                    Debug also goes to stderr.
+  LENS_KEEP_OPEN=1  (headed) leave the window open for inspection until Ctrl-C
+  LENS_SLOWMO=<ms>  slow Puppeteer actions so you can watch
+The ./debug-lens.sh wrapper sets all of these for you.
 ----------------------------------------------------------------------------*/
 const { execSync } = require('child_process');
 const fs = require('fs');
+const path = require('path');
+const os = require('os');
 const puppeteer = require('puppeteer-core');
 
 const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
@@ -59,11 +73,26 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
   'skip to main content', 'accessibility help', 'sign in', 'feedback', 'send feedback', 'translate',
   'footer links', 'privacy', 'terms', 'help', 'update location', 'all', 'ai mode', 'images', 'more']);
 
+// --- opt-in debug / headed mode (see header). Invisible to the plugin: all debug
+// output goes to stderr + files; stdout stays the single JSON result line.
+const HEADED = process.env.LENS_HEADED === '1';
+const DEBUG = HEADED || process.env.LENS_DEBUG === '1';
+const KEEPOPEN = HEADED && process.env.LENS_KEEP_OPEN === '1';
+const SLOWMO = parseInt(process.env.LENS_SLOWMO || '0', 10) || 0;
+const DBGDIR = process.env.LENS_DEBUG_DIR || path.join(os.tmpdir(), 'lens-debug');
+const dbg = (...a) => { if (DEBUG) console.error('DEBUG', ...a); };
+const dbgWrite = (name, content) => {
+  if (!DEBUG) return;
+  try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.writeFileSync(path.join(DBGDIR, name), content); }
+  catch (e) { console.error('DEBUG write failed', name, e.message); }
+};
+
 (async () => {
   if (!hasGeo && place) {
     const c = await geocode(place);
     if (c) { lat = c.lat; lng = c.lng; hasGeo = true; }
   }
+  dbg('geo: place=' + place + ' hasGeo=' + hasGeo + ' lat=' + lat + ' lng=' + lng);
   const jar = `/tmp/lens-jar-${process.pid}.txt`;
   fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
     '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
@@ -77,6 +106,9 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
       `'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=${Date.now()}'`, { timeout: 60000 }).toString().trim();
   } catch (e) { try { fs.unlinkSync(jar); } catch (_) {} fail('upload failed: ' + e.message); }
   if (!/[?&]vsrid=/.test(url)) { try { fs.unlinkSync(jar); } catch (_) {} fail('upload rejected (no results URL)'); }
+  dbg('results URL:', url);
+  dbgWrite('results-url.txt', url);
+  if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.copyFileSync(img, path.join(DBGDIR, 'uploaded.jpg')); } catch (e) { dbg('uploaded.jpg copy failed:', e.message); } }
 
   const cookies = fs.readFileSync(jar, 'utf8').split('\n')
     .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
@@ -86,11 +118,18 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
 
   let browser;
   try {
-    browser = await puppeteer.launch({ executablePath: CHROME, headless: 'new',
-      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US'] });
+    browser = await puppeteer.launch({
+      executablePath: CHROME,
+      headless: HEADED ? false : 'new',
+      slowMo: SLOWMO,
+      dumpio: DEBUG,
+      defaultViewport: HEADED ? null : undefined,
+      args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US',
+        ...(HEADED ? ['--start-maximized'] : [])],
+    });
     const page = await browser.newPage();
     await page.setUserAgent(UA);
-    await page.setViewport({ width: 1280, height: 1200 });
+    if (!HEADED) await page.setViewport({ width: 1280, height: 1200 });
     await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
     if (hasGeo) {
       try {
@@ -111,13 +150,60 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
       if (r.anchors > 40 && i >= 6) break; // no AI overview coming; proceed
       await sleep(1000);
     }
+    if (DEBUG) {
+      try { fs.mkdirSync(DBGDIR, { recursive: true }); } catch (_) {}
+      await page.screenshot({ path: path.join(DBGDIR, 'page.png'), fullPage: true }).catch(() => {});
+      try { fs.writeFileSync(path.join(DBGDIR, 'page.html'), await page.content()); } catch (_) {}
+      dbg('wrote page.png + page.html to', DBGDIR);
+    }
     const data = await page.evaluate(() => {
       const out = [];
-      const push = t => { t = (t || '').replace(/\s+/g, ' ').trim(); if (t.length >= 4 && t.length <= 200 && /[a-z]/.test(t)) out.push(t); };
-      document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(e => push(e.innerText));
-      document.querySelectorAll('a[href]').forEach(a => { const t = a.innerText; if (t && t.split(' ').length <= 14) push(t); });
+      const sources = [];
+      // "Noise" sections — Related searches / People also search for / etc. A stray
+      // binomial chip there (e.g. "Mustela subpalmata") is NOT about the photo, so it
+      // must not be scraped. Find those section headings, treat their subtree as
+      // off-limits, and record what we drop. If none are present this is a no-op.
+      const NOISE = /^(related searches|people also search for|people also ask|people also|more to ask|explore more|more results)\b/i;
+      const noiseRoots = [];
+      document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(h => {
+        if (NOISE.test((h.innerText || '').trim())) {
+          let n = h;
+          for (let k = 0; k < 3 && n.parentElement && n.parentElement !== document.body; k++) n = n.parentElement;
+          noiseRoots.push(n);
+        }
+      });
+      const inNoise = el => noiseRoots.some(r => r.contains(el));
+      const noiseLines = new Set();
+      noiseRoots.forEach(r => (r.innerText || '').split('\n').forEach(l => { l = l.trim(); if (l) noiseLines.add(l); }));
+
+      // nearest section heading / aria-label for an element (debug provenance)
+      const regionOf = el => {
+        for (let n = el, up = 0; n && up < 8; up++, n = n.parentElement) {
+          for (let s = n, k = 0; s && k < 6; k++, s = s.previousElementSibling) {
+            if (s.matches && s.matches('h1,h2,h3,div[role=heading],[aria-level]')) {
+              const t = (s.innerText || '').replace(/\s+/g, ' ').trim();
+              if (t && t.length <= 60) return t;
+            }
+          }
+          const al = n.getAttribute && (n.getAttribute('aria-label') || n.getAttribute('data-attrid'));
+          if (al) return al;
+        }
+        return '';
+      };
+
+      const push = (t, el) => {
+        t = (t || '').replace(/\s+/g, ' ').trim();
+        if (!(t.length >= 4 && t.length <= 200 && /[a-z]/.test(t))) return;
+        const region = el ? regionOf(el) : 'body-text';
+        const noise = el ? (inNoise(el) || NOISE.test(region)) : noiseLines.has(t);
+        sources.push({ text: t, region: region, excluded: noise });
+        if (!noise) out.push(t);
+      };
+
+      document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(e => push(e.innerText, e));
+      document.querySelectorAll('a[href]').forEach(a => { const t = a.innerText; if (t && t.split(' ').length <= 14) push(t, a); });
       const lines = (document.body ? document.body.innerText : '').split('\n').map(s => s.trim());
-      lines.forEach(line => { if (/[A-Z][a-z]+ [a-z]{3,}/.test(line)) push(line); });
+      lines.forEach(line => { if (/[A-Z][a-z]+ [a-z]{3,}/.test(line)) push(line, null); });
 
       // The "AI Overview" block is Google's single authoritative answer (it names
       // the species + binomial). Grab the prose lines right after that heading.
@@ -132,11 +218,23 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
           overview.push(l);
         }
       }
-      return { strings: out, overview: overview.join(' ') };
+      return { strings: out, sources: sources, overview: overview.join(' ') };
     });
     const seen = new Set(); const clean = [];
     for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
-    out({ ok: true, count: clean.length, overview: data.overview || '', strings: clean.slice(0, 80) });
+    const result = { ok: true, count: clean.length, overview: data.overview || '', strings: clean.slice(0, 80) };
+    if (DEBUG) {
+      dbgWrite('strings-sources.json', JSON.stringify(data.sources || [], null, 2));
+      dbgWrite('result.json', JSON.stringify(result, null, 2));
+      const dropped = (data.sources || []).filter(s => s.excluded).length;
+      dbg('scraped ' + clean.length + ' strings; excluded ' + dropped + ' from noise regions; AI overview ' + (result.overview ? 'present' : 'EMPTY'));
+    }
+    if (KEEPOPEN) {
+      console.log(JSON.stringify(result));
+      console.error('DEBUG: browser left open — compare the results URL in your own Chrome; Ctrl-C to exit.');
+      await new Promise(() => {});
+    }
+    out(result);
   } catch (e) {
     fail('render failed: ' + e.message);
   } finally {

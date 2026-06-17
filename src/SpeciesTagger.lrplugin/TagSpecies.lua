@@ -224,7 +224,12 @@ function M.run( _ )
 				else
 					applyNeedsReview( catalog, photo, cfg )
 					nReview = nReview + 1
-					local guess = result.top and ( result.top.taxon.scientificName or '' ) or ''
+					-- Show the common name alongside the Latin best guess (makes a wrong guess
+					-- obvious — "Egyptian weasel (Mustela subpalmata)" vs a bare binomial).
+					local tt = result.top and result.top.taxon or nil
+					local guess = tt and ( ( tt.commonName and tt.scientificName )
+						and ( tt.commonName .. ' (' .. tt.scientificName .. ')' )
+						or ( tt.commonName or tt.scientificName or '' ) ) or ''
 					lines[ #lines + 1 ] = '? ' .. fileName( photo ) ..
 						' — needs review' .. ( guess ~= '' and ( ' (best guess: ' .. guess .. ')' ) or '' )
 				end

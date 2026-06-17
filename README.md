@@ -166,14 +166,15 @@ false-positives. The numbers are honestly lower than the representative 100%
 
 ## Building & developing
 
-Four scripts at the repo root cover everything — run them directly, no need to
-dig through `scripts/`:
+Scripts at the repo root cover everything — run them directly, no need to dig
+through `scripts/`:
 
 ```
 ./dev-setup.sh     # one-time: bootstrap the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
 ./install.sh       # full install: toolchain + Lens helper deps + build + symlink into Lightroom
 ./build.sh         # build dist/SpeciesTagger.lrplugin (captures Lens corpus once, on first build)
 ./capture.sh       # (re)capture real Google Lens output for the ground-truth corpus
+./debug-lens.sh    # troubleshoot a wrong ID: run Lens in a visible Chrome with debug artifacts
 ```
 
 `./dev-setup.sh` builds an isolated, pinned Lua 5.1 + LuaRocks toolchain via
@@ -201,6 +202,32 @@ just install     # build + symlink into the local Lightroom Modules folder
 just check       # lint + test + build (run before pushing)
 ```
 
+### Troubleshooting a wrong identification
+
+When Lens tags something obviously wrong, watch the actual exchange with a visible
+Chrome window:
+
+```
+./debug-lens.sh /path/to/photo.jpg                    # or add "City, State" / lat lng
+```
+
+It opens Chrome on the real Lens results page and writes artifacts to
+`/tmp/lens-debug/` (override with `LENS_DEBUG_DIR`):
+
+| artifact | what it tells you |
+| --- | --- |
+| `uploaded.jpg` | the exact image sent to Lens — confirm it's the right, non-blank photo |
+| `page.png` / `page.html` | the rendered results page — is the right subject in the *Visual matches* grid? |
+| `results-url.txt` | open this in your **own logged-in Chrome** to compare against the headless render |
+| `strings-sources.json` | every scraped string, the page region it came from, and whether it was excluded as noise |
+| `result.json` | the final `{ overview, strings }` handed to the scorer (was the *AI Overview* empty?) |
+
+`strings-sources.json` is the decisive one: if a bogus name shows up with a region
+like *Related searches* / *People also search for* and `excluded: true`, the scrape
+correctly dropped it. The helper now excludes those noise sections so stray
+binomials (e.g. a "Related searches" chip) can no longer become a tag. Debug mode
+is env-gated (`LENS_HEADED` / `LENS_DEBUG`); normal plugin runs are unaffected.
+
 ### Layout
 
 ```
@@ -208,7 +235,7 @@ src/shared/        pure, testable modules (parser, taxonomy, scorer, keywords, p
 src/SpeciesTagger.lrplugin/  the Lightroom glue (menu, settings, catalog writes)
 spec/              unit specs + the accuracy harness + fixture corpus
 build/build.lua    composes/stamps/zips the bundle; pulls the one runtime dep (dkjson)
-dev-setup/install/build/capture.sh   the four top-level entry points
+*.sh (repo root)   entry points: dev-setup, install, build, capture, debug-lens
 scripts/           internal tooling (Lens browser helper, accuracy + corpus builders)
 ```
 
