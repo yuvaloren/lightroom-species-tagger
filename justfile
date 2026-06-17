@@ -14,7 +14,7 @@ default:
 
 # one-shot machine bootstrap: Homebrew + lua/luarocks/just + dev rocks + deps
 setup:
-    bash scripts/dev-setup.sh
+    bash ./dev-setup.sh
 
 # install the Lua dev tooling, then pull the pinned runtime dep (dkjson)
 deps:
@@ -49,6 +49,11 @@ accuracy: _deps
 # record a new fixture from a real image (see scripts/record-fixture.lua)
 record image *FLAGS: _deps
     lua scripts/record-fixture.lua {{image}} {{FLAGS}}
+
+# capture REAL Google Lens output for the ground-truth corpus, for offline replay.
+# Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.
+capture *FLAGS:
+    bash ./capture.sh {{FLAGS}}
 
 # measure REAL Google Lens accuracy via the browser helper (writes nothing).
 # Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.

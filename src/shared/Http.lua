@@ -68,13 +68,16 @@ function M.lensSearchAdapter( opts )
 		if exists( p ) then node = p; break end
 	end
 
-	return function( imageFile, lat, lng )
+	return function( imageFile, lat, lng, place )
 		if not exists( helper ) then return nil, 'Lens helper not found at ' .. tostring( helper ) end
 		local out = LrPathUtils.child( LrPathUtils.getStandardFilePath( 'temp' ),
 			string.format( 'speciestagger-lens-%d.json', os.time() ) )
-		-- pass the photo's location so Lens favours species that occur there
-		local geo = ( lat and lng ) and ( ' ' .. tostring( lat ) .. ' ' .. tostring( lng ) ) or ''
-		local cmd = node .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. geo .. ' > ' .. sh( out ) .. ' 2>/dev/null'
+		-- pass the photo's location so Lens favours species that occur there:
+		-- exact GPS coords if we have them, else a place name (the helper geocodes it).
+		local loc = ''
+		if lat and lng then loc = ' ' .. tostring( lat ) .. ' ' .. tostring( lng )
+		elseif place and place ~= '' then loc = ' ' .. sh( place ) end
+		local cmd = node .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. loc .. ' > ' .. sh( out ) .. ' 2>/dev/null'
 		LrTasks.execute( cmd )
 		local f = io.open( out, 'rb' )
 		local body = f and f:read( '*a' )

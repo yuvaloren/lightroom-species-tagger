@@ -166,20 +166,36 @@ false-positives. The numbers are honestly lower than the representative 100%
 
 ## Building & developing
 
-One self-contained script bootstraps a fresh machine (isolated, pinned Lua 5.1 +
-LuaRocks via [hererocks](https://github.com/luarocks/hererocks), matching CI and
-the Lightroom runtime):
+Four scripts at the repo root cover everything — run them directly, no need to
+dig through `scripts/`:
 
 ```
-bash scripts/dev-setup.sh        # or: just setup
+./dev-setup.sh     # one-time: bootstrap the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
+./install.sh       # full install: toolchain + Lens helper deps + build + symlink into Lightroom
+./build.sh         # build dist/SpeciesTagger.lrplugin (captures Lens corpus once, on first build)
+./capture.sh       # (re)capture real Google Lens output for the ground-truth corpus
 ```
 
-Everyday commands (each is a one-liner if you don't use [`just`](https://github.com/casey/just)):
+`./dev-setup.sh` builds an isolated, pinned Lua 5.1 + LuaRocks toolchain via
+[hererocks](https://github.com/luarocks/hererocks) (matching CI and the Lightroom
+runtime). `./install.sh` is the one command for a fresh machine — it runs
+`./dev-setup.sh` if needed, installs the Lens helper's Node deps, builds, and
+symlinks the bundle into your Lightroom Modules folder. Pass `--uninstall` to
+remove the symlink.
+
+The first `./build.sh` (or `./install.sh`) also captures real Google Lens output
+for the ground-truth corpus so accuracy work has live data to replay offline;
+that step needs Chrome + a residential network and is best-effort — skip it with
+`SKIP_CAPTURE=1`, or run `./capture.sh` yourself any time.
+
+Finer-grained commands via [`just`](https://github.com/casey/just) (optional sugar
+over `build/build.lua`; `just build` is the plain, no-capture build):
 
 ```
 just lint        # luacheck src spec scripts
 just test        # busted unit + accuracy specs
-just accuracy    # accuracy report over the fixture corpus
+just accuracy    # accuracy report over the offline fixture corpus
+just capture     # = ./capture.sh
 just build       # compose dist/SpeciesTagger.lrplugin, version-stamp, zip + checksums
 just install     # build + symlink into the local Lightroom Modules folder
 just check       # lint + test + build (run before pushing)
@@ -192,7 +208,8 @@ src/shared/        pure, testable modules (parser, taxonomy, scorer, keywords, p
 src/SpeciesTagger.lrplugin/  the Lightroom glue (menu, settings, catalog writes)
 spec/              unit specs + the accuracy harness + fixture corpus
 build/build.lua    composes/stamps/zips the bundle; pulls the one runtime dep (dkjson)
-scripts/           dev-setup, install, accuracy report, fixture recorder
+dev-setup/install/build/capture.sh   the four top-level entry points
+scripts/           internal tooling (Lens browser helper, accuracy + corpus builders)
 ```
 
 The only third-party **runtime** dependency is **dkjson** (JSON), pinned in

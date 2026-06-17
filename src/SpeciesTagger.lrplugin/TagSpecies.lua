@@ -118,6 +118,18 @@ local function photoGps( photo )
 	return nil
 end
 
+-- Fallback when there are no GPS coords: the IPTC place fields (sublocation, city,
+-- state, country). The Lens helper geocodes the resulting "City, State, Country".
+local function photoPlace( photo )
+	local parts = {}
+	for _, key in ipairs { 'location', 'city', 'stateProvince', 'country' } do
+		local ok, v = pcall( function() return photo:getFormattedMetadata( key ) end )
+		if ok and type( v ) == 'string' and v ~= '' then parts[ #parts + 1 ] = v end
+	end
+	if #parts == 0 then return nil end
+	return table.concat( parts, ', ' )
+end
+
 local function observe( photo, cfg, deps )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
@@ -131,7 +143,10 @@ local function observe( photo, cfg, deps )
 	end
 
 	local opts = optsFor( cfg.backend, cfg, bytes, file )
-	if cfg.backend == 'lens' then opts.lat, opts.lng = photoGps( photo ) end
+	if cfg.backend == 'lens' then
+		opts.lat, opts.lng = photoGps( photo )
+		if not opts.lat then opts.place = photoPlace( photo ) end
+	end
 
 	local obs, oerr = provider.identify( opts, deps )
 	if file then LrFileUtils.delete( file ) end

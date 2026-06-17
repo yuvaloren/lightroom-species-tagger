@@ -2,7 +2,7 @@
 /dist/
 /build/.deps/
 
-# Pinned local Lua toolchain (created by scripts/dev-setup.sh)
+# Pinned local Lua toolchain (created by ./dev-setup.sh)
 /.lua-env/
 
 # Test coverage artifacts

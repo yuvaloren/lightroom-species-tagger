@@ -139,7 +139,7 @@ local function ensure_dkjson( force )
 		return cached
 	end
 	if not have_tool( 'luarocks' ) then
-		die( 'luarocks is required to fetch dkjson — run scripts/dev-setup.sh (or `just setup`)' )
+		die( 'luarocks is required to fetch dkjson — run ./dev-setup.sh (or `just setup`)' )
 	end
 	mkdirp( DEPS )
 	local tree = DEPS .. '/_rocks'

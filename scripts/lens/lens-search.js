@@ -26,11 +26,26 @@ const puppeteer = require('puppeteer-core');
 const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
 const img = process.argv[2];
-// optional photo location: node lens-search.js <image> [lat] [lng] — gives Lens
-// geographic context so it favours species that occur there.
-const lat = parseFloat(process.argv[3]);
-const lng = parseFloat(process.argv[4]);
-const hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
+// optional photo location, to give Lens geographic context so it favours species
+// that occur there:
+//   node lens-search.js <image> <lat> <lng>        -- exact GPS coordinates
+//   node lens-search.js <image> "City, State, …"   -- a place name (geocoded)
+let lat = parseFloat(process.argv[3]);
+let lng = parseFloat(process.argv[4]);
+let hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
+const place = (!hasGeo && process.argv[3] && process.argv[3].trim() !== '') ? process.argv[3].trim() : null;
+
+// Geocode a place name to coordinates via OpenStreetMap Nominatim (free, no key).
+async function geocode(name) {
+  try {
+    const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(name);
+    const r = await fetch(u, { headers: { 'User-Agent': 'lightroom-species-tagger/0.1 (species id)' } });
+    if (!r.ok) return null;
+    const j = await r.json();
+    if (Array.isArray(j) && j[0]) return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
+  } catch (_) {}
+  return null;
+}
 const sleep = ms => new Promise(r => setTimeout(r, ms));
 const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
 const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
@@ -45,6 +60,10 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
   'footer links', 'privacy', 'terms', 'help', 'update location', 'all', 'ai mode', 'images', 'more']);
 
 (async () => {
+  if (!hasGeo && place) {
+    const c = await geocode(place);
+    if (c) { lat = c.lat; lng = c.lng; hasGeo = true; }
+  }
   const jar = `/tmp/lens-jar-${process.pid}.txt`;
   fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
     '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +

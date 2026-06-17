@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# scripts/dev-setup.sh — one-shot developer bootstrap (macOS / Linux).
+# dev-setup.sh — one-shot developer bootstrap (macOS / Linux).
 #
 # Builds an isolated, pinned Lua 5.1.5 + LuaRocks toolchain in .lua-env/ (matching
 # CI and the Lightroom runtime), then installs the dev rocks and pulls the pinned
@@ -9,7 +9,7 @@
 # puts .lua-env/bin first on PATH automatically).
 set -euo pipefail
 
-cd "$(dirname "$0")/.."
+cd "$(dirname "$0")"
 ROOT="$(pwd)"
 ENV_DIR="$ROOT/.lua-env"
 
