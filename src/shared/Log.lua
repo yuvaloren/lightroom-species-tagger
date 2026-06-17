@@ -8,13 +8,15 @@ unchanged. Also exposes redact() for keeping API keys/tokens out of logs.
 local M = {}
 
 -- Replace anything that looks like a secret with a placeholder. Best-effort:
--- Google API keys (AIza...), and explicit key= / api_key= / api-key= URL params
--- (Pl@ntNet uses the hyphenated `api-key=`; Vision uses `key=`).
+-- Google API keys (AIza...), explicit key= / api_key= / api-key= URL params
+-- (Pl@ntNet uses the hyphenated `api-key=`; Vision uses `key=`), and a Cookie
+-- header value (the Google Lens session cookie).
 function M.redact( s )
 	if type( s ) ~= 'string' then return s end
 	s = s:gsub( '(api[%-_]key=)[%w%-_]+', '%1<key>' )
 	s = s:gsub( '([?&]key=)[%w%-_]+', '%1<key>' )
 	s = s:gsub( 'AIza[%w%-_]+', '<google-key>' )
+	s = s:gsub( '([Cc]ookie:%s*)[^\r\n]+', '%1<redacted>' )
 	return s
 end
 

@@ -47,30 +47,34 @@ reef shot with a fish *and* an octopus gets both.
 
 ## Backends
 
-| Backend | What it is | Cost / key | Coverage | Notes |
+| Backend | What it is | Cost / setup | Coverage | Notes |
 |---|---|---|---|---|
-| **Google Lens (direct)** *(default)* | Talks to Google Lens directly — uploads the image bytes and harvests the match data from the results page | **Free, no key** | plants + animals | Closest to the Lens app; best-effort — Google may rate-limit/block (see below) |
+| **Google Lens (browser session)** *(default)* | Talks to Google Lens directly — uploads the image and harvests the match data from the results page | **Free, no key**, but you paste your **browser session cookie** (macOS/Linux; uses `curl`) | plants + animals | Closest to the Lens app; best-effort (see below) |
 | **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; returns clean scientific + common names |
-| **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, but not card-free — opt in only if that's OK |
+| **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, ToS-clean; opt in only if a card is OK |
 
 All three send the image bytes directly (no third-party image host) and feed the
 **identical** parser → GBIF → scorer pipeline, so the accuracy logic is shared and
 testable regardless of backend.
 
-> **On the default (Google Lens, direct):** there is no official Google Lens API,
-> so this backend uploads to Lens like a browser would and parses the results. It
-> needs no key and costs nothing, but Google actively discourages automated access
-> — from a normal home connection occasional batches usually work; if Google
-> rate-limits or blocks the request the photo just falls through to *needs review*
-> (it never crashes), and you can switch to Pl@ntNet/Vision. It's deliberately
-> resilient to Google's page changes (it harvests names rather than walking fragile
-> fixed offsets), but treat it as best-effort, not a guaranteed service.
+> **On the default (Google Lens):** there is no official Google Lens API, and
+> Google requires a genuine **browser session** to use Lens (real cookies; even
+> Safari works, so Chrome integrity headers aren't needed — the session is what
+> matters). The plugin can't fake that, so it **shells out to `curl` with a cookie
+> you paste** (from a browser where lens.google.com works — see Settings). This is
+> best-effort: a stale cookie or a flagged network makes a photo fall through to
+> *needs review* (it never crashes), and you can switch to Pl@ntNet/Vision. The
+> parser harvests names (rather than walking fragile fixed offsets), so it degrades
+> gracefully when Google changes the page. macOS/Linux only for now (`curl` + POSIX
+> shell). You can also validate/refresh the offline corpus from your session with
+> `just refresh-fixtures`.
 
 ## Requirements
 
 - Adobe Lightroom Classic (built against SDK ≥ 6 APIs).
-- A key **only if** you pick a keyed backend:
-  - **Google Lens (default):** no key, nothing to set up.
+- For the backend you pick:
+  - **Google Lens (default):** no key, but paste your **browser session cookie**
+    in settings (macOS/Linux; needs `curl` on PATH). Lens has no anonymous API.
   - **Pl@ntNet:** a free [Pl@ntNet](https://my.plantnet.org/) API key (no credit card).
   - **Vision:** a [Google Cloud Vision](https://cloud.google.com/vision) API key
     (requires a GCP project with billing enabled).

@@ -120,7 +120,15 @@ local function observe( photo, cfg, http )
 		if not file then return nil, 'temp file: ' .. tostring( werr ) end
 	end
 
-	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), { http = http } )
+	-- Google Lens needs a real browser session, which LrHttp can't drive (it drops
+	-- the session cookie across the upload→results redirect), so use the curl
+	-- transport with the user's pasted cookie. Other backends use LrHttp.
+	local providerHttp = http
+	if provider.needsCookie then
+		providerHttp = Http.curlAdapter( { cookie = cfg.lensCookie } )
+	end
+
+	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), { http = providerHttp } )
 	if file then LrFileUtils.delete( file ) end
 	return obs, oerr
 end

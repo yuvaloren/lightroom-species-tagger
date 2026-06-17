@@ -34,10 +34,20 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:popup_menu { value = bind 'backend', items = backendItems },
 			},
 			f:static_text {
-				title = 'Google Lens (direct) is free and needs no key — it uploads a downsized ' ..
-					'copy straight to Google. Pl@ntNet (plants) and Google Vision each need their ' ..
-					'own key below. See docs/PRIVACY.md for what leaves your machine.',
-				wrap = true, width = 540, height_in_lines = 2,
+				title = 'Google Lens needs your browser session (it has no anonymous API): the plugin ' ..
+					'shells out to curl with the cookie you paste below. Pl@ntNet (plants) and Google ' ..
+					'Vision instead use their own key. See docs/PRIVACY.md for what leaves your machine.',
+				wrap = true, width = 540, height_in_lines = 3,
+			},
+			f:row {
+				f:static_text { title = 'Lens cookie:', width = labelW, alignment = 'right' },
+				f:password_field { value = bind 'lensCookie', width_in_chars = 40 },
+			},
+			f:static_text {
+				title = 'For Lens: in a browser where lens.google.com works, open DevTools → Network, ' ..
+					'do a Lens image search, click the "upload" request, and copy its Cookie header ' ..
+					'value here. Re-paste when it expires. (macOS/Linux; needs curl on PATH.)',
+				wrap = true, width = 540, height_in_lines = 3,
 			},
 			f:row {
 				f:static_text { title = 'Pl@ntNet key:', width = labelW, alignment = 'right' },

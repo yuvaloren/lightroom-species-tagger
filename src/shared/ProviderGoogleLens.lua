@@ -33,16 +33,17 @@ local json = require 'dkjson'
 
 local M = {
 	id = 'lens',
-	label = 'Google Lens (direct, no key)',
-	needsImageFile = true,  -- uploads bytes as an LrHttp multipart file (no image host)
+	label = 'Google Lens (direct, browser session)',
+	needsImageFile = true,  -- uploads bytes as a multipart file (no image host)
+	needsCookie = true,     -- needs your Google session cookie (Lens has no anonymous API)
 	UPLOAD_URL = 'https://lens.google.com/v3/upload',
-	-- A current desktop-Chrome UA + a consent ("SOCS") cookie so Google serves
-	-- results instead of the EU consent interstitial. These are the only knobs we
-	-- have from LrHttp (which has no cookie jar across redirects); update the UA
-	-- periodically if Google starts rejecting it.
+	-- Google Lens has no anonymous endpoint: it requires a real browser SESSION.
+	-- A Safari UA is used (Safari works without Chrome's x-client-data /
+	-- x-browser-validation integrity headers, so we don't need to forge those —
+	-- the session cookie is what matters). The cookie is supplied by the caller
+	-- (the Lightroom curl transport injects the user's pasted cookie).
 	USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' ..
-		'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/126.0.0.0 Safari/537.36',
-	CONSENT_COOKIE = 'SOCS=CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg; CONSENT=YES+',
+		'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
 }
 
 --------------------------------------------------------------------------------
@@ -166,9 +167,14 @@ end
 --------------------------------------------------------------------------------
 -- network (production; uses injected deps.http)
 
+-- Mirror a browser "paste into Google Images/Lens" upload: the entry-point (ep),
+-- locale, viewport, and a per-request timestamp. opts.st lets callers/tests pin it.
 function M.buildUploadUrl( opts )
-	return M.UPLOAD_URL .. '?hl=' .. urlencode( opts.hl or 'en' ) ..
-		'&gl=' .. urlencode( opts.country or 'us' )
+	local st = opts.st or ( tostring( os.time() ) .. '000' )
+	return M.UPLOAD_URL .. '?ep=gsbubb&authuser=0' ..
+		'&hl=' .. urlencode( opts.hl or 'en' ) ..
+		'&gl=' .. urlencode( opts.country or 'us' ) ..
+		'&vpw=800&vph=1000&st=' .. urlencode( st )
 end
 
 -- LrHttp.postMultipart content array: the image goes in the `encoded_image` part.
@@ -181,12 +187,24 @@ function M.buildParts( opts )
 	} }
 end
 
-function M.buildHeaders()
-	return {
+-- Browser-like headers for the upload. The session Cookie is NOT set here — the
+-- Lightroom curl transport injects the user's pasted cookie (and manages the
+-- cookie jar across the results redirect). opts.cookie lets a caller add one.
+function M.buildHeaders( opts )
+	local h = {
 		[ 'User-Agent' ] = M.USER_AGENT,
-		[ 'Cookie' ] = M.CONSENT_COOKIE,
+		[ 'Accept' ] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
 		[ 'Accept-Language' ] = 'en-US,en;q=0.9',
+		[ 'Origin' ] = 'https://www.google.com',
+		[ 'Referer' ] = 'https://www.google.com/',
+		[ 'Sec-Fetch-Dest' ] = 'document',
+		[ 'Sec-Fetch-Mode' ] = 'navigate',
+		[ 'Sec-Fetch-Site' ] = 'same-site',
+		[ 'Sec-Fetch-User' ] = '?1',
+		[ 'Upgrade-Insecure-Requests' ] = '1',
 	}
+	if opts and opts.cookie and opts.cookie ~= '' then h[ 'Cookie' ] = opts.cookie end
+	return h
 end
 
 -- Recognise the common "Google won't serve you" pages so we can report a clear
@@ -198,22 +216,27 @@ local function blockReason( html )
 			'or use the Pl@ntNet / Vision backend.'
 	end
 	if html:find( 'Error 403', 1, true ) or html:find( 'consent.google.com', 1, true ) then
-		return 'Google Lens blocked this request (403 / consent wall). This is common from ' ..
-			'shared or datacenter networks; try again later or use another backend.'
+		return 'Google Lens blocked this request (403 / consent wall) — usually a stale or ' ..
+			'missing session cookie, or a shared/datacenter network.'
+	end
+	if html:find( 'not associated with your account', 1, true ) or html:find( 'Re%-upload the image' ) then
+		return 'Google Lens did not associate the upload with your session — your Lens cookie is ' ..
+			'likely expired or incomplete. Re-copy it from your browser into the plugin settings.'
 	end
 	return nil
 end
 
--- fetch( opts, deps ) -> decoded, err   (opts: imageFile, hl, country)
+-- fetch( opts, deps ) -> decoded, err   (opts: imageFile, hl, country, cookie)
 function M.fetch( opts, deps )
 	if not opts.imageFile then return nil, 'Google Lens needs an image file (opts.imageFile)' end
-	local body = deps.http.postMultipart( M.buildUploadUrl( opts ), M.buildParts( opts ), M.buildHeaders() )
+	local body = deps.http.postMultipart(
+		M.buildUploadUrl( opts ), M.buildParts( opts ), M.buildHeaders( opts ) )
 	local reason = blockReason( body )
 	if reason then return nil, reason end
 	local decoded = M.extractData( body )
 	if not decoded then
 		return nil, 'Google Lens returned no parseable results (the page layout may have changed, ' ..
-			'or the request was blocked).'
+			'or the session was rejected).'
 	end
 	return decoded
 end

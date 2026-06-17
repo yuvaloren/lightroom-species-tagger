@@ -7,21 +7,23 @@ signal and then adds a real taxonomy resolver (GBIF) and a confidence model on
 top, so the output is canonical names rather than free-text guesses.
 
 ### Does it cost money? Do I need an API key?
-The default **Google Lens (direct)** backend is **free and needs no key** — it
-talks to Google Lens the way the website does. GBIF (the taxonomy) is free and
-keyless too. The optional backends need their own (free or paid) key: **Pl@ntNet**
-is a free key (500/day, no credit card); **Google Vision** needs a Google Cloud
-project with billing enabled (a card on file; ~1,000 images/month free, then
-paid). You bring your own keys for those.
+No money, and no API key for the default **Google Lens** backend — but Lens has
+no anonymous API, so you paste your **browser session cookie** once (from a
+browser where lens.google.com works) and the plugin uses `curl` with it
+(macOS/Linux). GBIF (the taxonomy) is free and keyless. The other backends use
+their own key: **Pl@ntNet** is a free key (500/day, no credit card); **Google
+Vision** needs a Google Cloud project with billing enabled (a card on file;
+~1,000 images/month free, then paid).
 
-### Is the free Google Lens backend reliable?
-It's **best-effort**. There is no official Google Lens API, so the backend
-uploads your image like a browser and parses the results page. From a normal home
-(residential) connection, occasional batches generally work. But Google actively
-discourages automated access and may respond with a consent wall, a CAPTCHA, or a
-rate-limit — especially from shared, VPN, or datacenter networks. When that
-happens the plugin reports it and the photo goes to **needs review**; it never
-crashes or double-tags. If you hit blocks often, use Pl@ntNet (plants) or Vision.
+### How do I get the Lens cookie, and is it reliable?
+In a browser where lens.google.com works: open DevTools → Network, run a Lens
+image search, click the `upload` request, and copy its **Cookie** header value
+into the plugin's **Lens cookie** setting. Re-paste when it expires. It's
+**best-effort**: Google requires a genuine browser session (real cookies; even
+Safari works, so it's the session, not Chrome-specific headers, that matters). A
+stale cookie or a flagged/datacenter network makes the photo fall through to
+**needs review** — it never crashes or double-tags. If you hit this often, use
+Pl@ntNet (plants) or Vision.
 
 ### Lens vs Pl@ntNet vs Vision — which should I use?
 - **Lens (direct):** free, no key, broad coverage (plants + animals), closest to
