@@ -26,13 +26,11 @@ Usage:  lua scripts/build-corpus.lua                   (resolve + write dataset)
         lua scripts/build-corpus.lua --corpus --live   (REFRESH fixtures from real Google
                                                         Lens by replaying your browser's
                                                         own request — see below)
-For --live you must first capture your browser's Lens request, because Google
-requires a genuine Chrome session (real cookies + Chrome integrity headers that
-can't be synthesized). In Chrome: open google.com, DevTools > Network (Preserve
-log), paste an image into Google Images/Lens, click the `upload` request to
-lens.google.com/v3/upload > Copy as cURL, and save it to
-spec/fixtures/.lens-session.curl (gitignored). --live then replays that exact
-request with each corpus image. Re-copy when the cookies expire.
+--live SELF-GENERATES a Google session (warms up fresh cookies via curl, like a
+fresh incognito window) and replays it for each corpus image — no browser setup.
+If a self-generated session is refused on your network, drop a Chrome "Copy as
+cURL" of a lens.google.com/v3/upload request at spec/fixtures/.lens-session.curl
+(gitignored) and --live will replay its exact headers + cookies instead.
 Then `just accuracy` scores the (now real) fixtures offline; the saved lens/*.json
 and lens/raw/*.html are yours to inspect and diff.
 Requires: curl, and `lua build/build.lua --fetch-deps` (for dkjson).
@@ -192,21 +190,17 @@ end
 
 local function fileExists( p ) local f = io.open( p, 'rb' ); if f then f:close(); return true end return false end
 
--- Capture REAL Google Lens output by REPLAYING your browser's own request.
--- Google requires a genuine Chrome session for Lens — real cookies (NID/AEC/…)
--- plus Chrome integrity headers (x-client-data, x-browser-validation) that can't
--- be synthesized headlessly. So instead of faking a browser, we reuse yours:
+-- Capture REAL Google Lens output. By default we SELF-GENERATE a session the same
+-- way the plugin's curl transport does: pre-seed consent, warm up fresh cookies
+-- from google.com, then upload + follow the results redirect in one cookie jar
+-- (like a fresh incognito window — no browser copy-paste).
 --
---   1. In Chrome open https://www.google.com, DevTools > Network (Preserve log).
---   2. Paste an image into Google Images / Lens.
---   3. Click the `upload` request to lens.google.com/v3/upload > Copy > Copy as cURL.
---   4. Save it to spec/fixtures/.lens-session.curl (gitignored; redact SID/HSID/
---      SSID/SAPISID/__Secure-*PSID* if you like — NID/AEC/SOCS are what matter).
---
--- This function then reissues that exact request (same headers + cookies) with our
--- image and a fresh `st`, following the results redirect in one session. Re-copy
--- the cURL when the cookies expire.
+-- Optional override: if spec/fixtures/.lens-session.curl exists (a Chrome "Copy as
+-- cURL" of a lens.google.com/v3/upload request, gitignored), we replay its exact
+-- headers + cookies instead — useful if a self-generated session is refused.
 local SESSION_CURL = FIX .. '/.lens-session.curl'
+local LENS_UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' ..
+	'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15'
 
 local function parseSessionCurl()
 	local f = io.open( SESSION_CURL, 'r' )
@@ -215,7 +209,6 @@ local function parseSessionCurl()
 	local headers, cookie = {}, s:match( "%-b%s+'([^']*)'" ) or s:match( '%-b%s+"([^"]*)"' )
 	for h in s:gmatch( "%-H%s+'([^']*)'" ) do
 		local low = h:lower()
-		-- curl regenerates these for our multipart body; don't replay stale ones
 		if not ( low:find( '^content%-length:' ) or low:find( '^content%-type:' ) ) then
 			headers[ #headers + 1 ] = h
 		end
@@ -224,28 +217,47 @@ local function parseSessionCurl()
 end
 
 local function captureLiveLens( imagePath )
-	local headers, cookie = parseSessionCurl()
-	if not headers or #headers == 0 then
-		return nil, nil, 'no browser session at ' .. SESSION_CURL ..
-			' — paste your Chrome "Copy as cURL" there (see scripts/build-corpus.lua header)'
-	end
+	local override, cookie = parseSessionCurl()
 	local jar = os.tmpname()
-	local cmd = 'curl -sS --compressed -L -c ' .. shquote( jar )
-	if cookie then cmd = cmd .. ' -b ' .. shquote( cookie ) end
-	for _, h in ipairs( headers ) do cmd = cmd .. ' -H ' .. shquote( h ) end
-	-- our image + a fresh timestamp; keep the browser's entry-point params
+	do -- pre-seed consent so Google serves results instead of consent.google.com
+		local jf = io.open( jar, 'w' )
+		jf:write( '# Netscape HTTP Cookie File\n' )
+		jf:write( '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' )
+		jf:write( '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n' )
+		jf:close()
+	end
+	local base = 'curl -sS --compressed -L --max-time 30 -c ' .. shquote( jar ) .. ' -b ' .. shquote( jar )
+	if cookie then base = base .. ' -b ' .. shquote( cookie ) end
+
+	local hdrs = ''
+	if override and #override > 0 then
+		for _, h in ipairs( override ) do hdrs = hdrs .. ' -H ' .. shquote( h ) end
+	else
+		-- default browser-like headers + warm up the session (fresh NID/AEC)
+		hdrs = ' -H ' .. shquote( 'User-Agent: ' .. LENS_UA ) ..
+			' -H ' .. shquote( 'Accept-Language: en-US,en;q=0.9' ) ..
+			' -H ' .. shquote( 'Accept: text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8' ) ..
+			' -H ' .. shquote( 'Origin: https://www.google.com' ) ..
+			' -H ' .. shquote( 'Referer: https://www.google.com/' ) ..
+			' -H ' .. shquote( 'Sec-Fetch-Site: same-site' ) ..
+			' -H ' .. shquote( 'Sec-Fetch-Mode: navigate' ) ..
+			' -H ' .. shquote( 'Sec-Fetch-Dest: document' )
+		run( base .. ' -H ' .. shquote( 'User-Agent: ' .. LENS_UA ) ..
+			' -o /dev/null ' .. shquote( 'https://www.google.com/' ) .. ' 2>/dev/null' )
+	end
+
 	local st = tostring( os.time() ) .. '000'
 	local url = 'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&vpw=800&vph=1000&st=' .. st
-	cmd = cmd .. ' -F ' .. shquote( 'encoded_image=@' .. imagePath .. ';type=image/jpeg' ) ..
-		' ' .. shquote( url ) .. ' 2>/dev/null'
-	local raw = run( cmd )
+	local raw = run( base .. hdrs ..
+		' -F ' .. shquote( 'encoded_image=@' .. imagePath .. ';type=image/jpeg' ) ..
+		' ' .. shquote( url ) .. ' 2>/dev/null' )
 	os.remove( jar )
 
 	local reason = Lens._test.blockReason( raw )
 	if reason then return nil, raw, reason end
 	local decoded = Lens.extractData( raw )
 	if not decoded then
-		return nil, raw, 'no parseable Lens results — the session may be expired; re-copy the cURL'
+		return nil, raw, 'no parseable Lens results (session refused; try the .lens-session.curl fallback)'
 	end
 	return decoded, raw, nil
 end
