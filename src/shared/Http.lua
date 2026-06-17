@@ -60,6 +60,11 @@ function M.lensSearchAdapter( opts )
 	-- When set (the in-app "Debug Lens" action), run a VISIBLE Chrome and keep the
 	-- helper's artifacts + stderr in this dir; otherwise headless, stderr discarded.
 	local debugDir = opts.debugDir
+	-- Interactive: escalate to a visible window on a Google challenge so the user can
+	-- solve it, then parse the real results. Gated by a run-scoped allow flag so a
+	-- batch stops prompting once the user cancels.
+	local interactive = opts.interactive
+	local interactiveState = opts.interactiveState
 
 	local function sh( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
 	local function exists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
@@ -88,6 +93,9 @@ function M.lensSearchAdapter( opts )
 			envp = 'LENS_HEADED=1 LENS_DEBUG=1 LENS_KEEP_OPEN=1 LENS_DEBUG_DIR=' .. sh( debugDir ) .. ' '
 			errRedir = '2> ' .. sh( LrPathUtils.child( debugDir, 'helper-stderr.log' ) )
 		end
+		if interactive and ( not interactiveState or interactiveState.allow ) then
+			envp = envp .. 'LENS_INTERACTIVE=1 '
+		end
 		local cmd = envp .. sh( node ) .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. loc ..
 			' > ' .. sh( out ) .. ' ' .. errRedir
 		LrTasks.execute( cmd )
@@ -100,6 +108,12 @@ function M.lensSearchAdapter( opts )
 				'(see scripts/lens/README), or use the Pl@ntNet / Vision backend.'
 		end
 		local d = json.decode( body )
+		-- User cancelled the interactive challenge: a distinct sentinel (not an error)
+		-- so the caller can skip the photo and stop prompting for the rest of the run.
+		if type( d ) == 'table' and d.cancelled then
+			if interactiveState then interactiveState.allow = false end
+			return nil, '__lens_cancelled__'
+		end
 		if type( d ) ~= 'table' or not d.ok then
 			return nil, 'Google Lens: ' .. ( d and tostring( d.error ) or 'helper error' )
 		end

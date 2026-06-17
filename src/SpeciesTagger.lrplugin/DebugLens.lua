@@ -67,6 +67,7 @@ function M.run( _ )
 		helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
 		nodePath = cfg.nodePath,
 		debugDir = debugDir,
+		interactive = true, -- debugging a challenged session is exactly when you solve it
 	}
 	local providerDeps = { http = http, lensSearch = lensSearch }
 
@@ -78,6 +79,11 @@ function M.run( _ )
 	-- and helper-stderr.log explain what happened even on failure.
 	LrShell.revealInShell( debugDir )
 
+	if err == '__lens_cancelled__' then
+		LrDialogs.message( 'Species Tagger — Debug Lens',
+			'Cancelled — the Google check was not completed.\n\nArtifacts are at:\n' .. debugDir, 'info' )
+		return
+	end
 	if not obs or #obs == 0 then
 		LrDialogs.message( 'Species Tagger — Debug Lens',
 			'Lens helper failed or returned nothing:\n\n' .. tostring( err or 'no observations were scraped' ) ..

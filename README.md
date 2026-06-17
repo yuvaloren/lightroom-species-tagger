@@ -234,6 +234,30 @@ correctly dropped it. The helper now excludes those noise sections so stray
 binomials (e.g. a "Related searches" chip) can no longer become a tag. Debug mode
 is env-gated (`LENS_HEADED` / `LENS_DEBUG`); normal plugin runs are unaffected.
 
+### When Google challenges the session
+
+Google sometimes flags the anonymous upload with a CAPTCHA / "unusual traffic" /
+consent wall, so the page has no real results to parse. For a **single-photo**
+selection the plugin handles this interactively: it runs headless first, and only
+if it can't confidently parse the result does it open a **visible Chrome window**
+so you can complete the check. It then auto-detects the real results (or you click
+the injected **"Parse results"** button; **"Cancel"** / a 3-minute timeout aborts
+and the photo is marked *skipped*). Multi-photo batches stay headless and never
+block. Tunable via `LENS_INTERACTIVE` / `LENS_INTERACTIVE_TIMEOUT` in the helper.
+
+This whole flow has an automated integration test that fakes a local "Google"
+(challenge page + results page) — no network — and drives the real helper headless
+through every branch (confident, challenge→auto-detect, cancel/timeout, the Parse
+button, non-interactive):
+
+```
+just lens-test        # = node scripts/lens/test/integration.test.js (needs Chrome)
+```
+
+To raise its fidelity with a **real** captured page, run the debug mode above and
+copy the saved `page.html` (results) / `page-challenge.html` (the challenge) into
+`scripts/lens/test/fixtures/`; the test server will serve them.
+
 ### Layout
 
 ```

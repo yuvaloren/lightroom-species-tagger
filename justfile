@@ -55,6 +55,11 @@ record image *FLAGS: _deps
 capture *FLAGS:
     bash ./capture.sh {{FLAGS}}
 
+# integration test for the interactive challenge-handling flow (fake local Google,
+# no network). Needs Node + Chrome + `cd scripts/lens && npm i`. Not in `just check`.
+lens-test:
+    node scripts/lens/test/integration.test.js
+
 # measure REAL Google Lens accuracy via the browser helper (writes nothing).
 # Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.
 live-accuracy *FLAGS: _deps

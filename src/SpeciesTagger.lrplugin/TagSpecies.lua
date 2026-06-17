@@ -182,12 +182,22 @@ function M.run( _ )
 	-- Google Lens has no API and renders results with JS, so its backend shells out
 	-- to the bundled Node + Chrome helper (built once per run). Other backends and
 	-- all GBIF lookups use LrHttp.
+	-- Interactive (escalate to a visible window on a Google challenge) only for a
+	-- single-photo selection — a multi-photo batch must not block per-photo waiting
+	-- for the human. interactiveState lets a cancel stop any further prompting.
+	local interactiveState = { allow = true }
+	local interactive = ( #photos == 1 )
 	local lensSearch
 	if Providers.get( cfg.backend ).usesLensHelper then
 		lensSearch = Http.lensSearchAdapter {
 			helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
 			nodePath = cfg.nodePath,
+			interactive = interactive,
+			interactiveState = interactiveState,
 		}
+		if interactive then
+			LrDialogs.showBezel( 'If Google shows a check, a Chrome window will open — solve it there.' )
+		end
 	end
 	local providerDeps = { http = http, lensSearch = lensSearch }
 	local resolveCache = {} -- shared GBIF cache for the whole run
@@ -198,7 +208,7 @@ function M.run( _ )
 	local progress = LrProgressScope { title = 'Identifying species…' }
 	progress:setCancelable( true )
 
-	local nApplied, nReview, nError = 0, 0, 0
+	local nApplied, nReview, nError, nSkipped = 0, 0, 0, 0
 	local lines = {}
 
 	for i, photo in ipairs( photos ) do
@@ -207,7 +217,10 @@ function M.run( _ )
 		progress:setCaption( fileName( photo ) )
 
 		local obs, err = M.observe( photo, cfg, providerDeps )
-		if not obs then
+		if err == '__lens_cancelled__' then
+			nSkipped = nSkipped + 1
+			lines[ #lines + 1 ] = '⊘ ' .. fileName( photo ) .. ' — skipped (Google check cancelled)'
+		elseif not obs then
 			nError = nError + 1
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )
 			log:warn( 'observe failed: ' .. Log.redact( tostring( err ) ) )
@@ -246,8 +259,8 @@ function M.run( _ )
 	progress:done()
 
 	local summary = string.format(
-		'Tagged %d, flagged %d for review, %d error%s (of %d).\n\n%s',
-		nApplied, nReview, nError, nError == 1 and '' or 's', #photos,
+		'Tagged %d, flagged %d for review, skipped %d, %d error%s (of %d).\n\n%s',
+		nApplied, nReview, nSkipped, nError, nError == 1 and '' or 's', #photos,
 		table.concat( lines, '\n' ) )
 	LrDialogs.message( 'Species Tagger', summary, ( nError > 0 and nApplied == 0 ) and 'warning' or 'info' )
 end
