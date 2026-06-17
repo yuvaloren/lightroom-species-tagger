@@ -89,12 +89,17 @@ function M.parse( decoded )
 	local list = decoded.strings or decoded
 
 	if overview and overview ~= '' then
-		obs[ #obs + 1 ] = { text = overview, kind = 'label', weight = 2.0, source = 'lens:ai' }
+		-- Google's AI Overview is its single authoritative answer; mark it so the
+		-- scorer trusts it over the noisy (often binomial-bearing) match titles.
+		obs[ #obs + 1 ] = { text = overview, kind = 'label', weight = 2.0, source = 'lens:ai', authoritative = true }
 	end
 	local MAX = 40 -- bound the candidate count (each may become a GBIF lookup downstream)
 	for i, text in ipairs( harvest( list ) ) do
 		if i > MAX then break end
-		obs[ #obs + 1 ] = { text = text, kind = 'title', weight = 0.5, source = 'lens:web' }
+		-- low weight: visual-match titles are noisy supporting signal (Lens shows many
+		-- related species). The AI Overview above is the authoritative answer; titles
+		-- mostly corroborate. Keeps the precision bar high for title-only candidates.
+		obs[ #obs + 1 ] = { text = text, kind = 'title', weight = 0.35, source = 'lens:web' }
 	end
 	return obs
 end

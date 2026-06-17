@@ -32,6 +32,11 @@ M.DEFAULTS = {
 	maxCandidates = 14, -- bound on resolver calls per image
 	squashK = 2.0,
 	minSupport = 0.8, -- floor below which nothing is ever "confident"
+	-- Common names are ambiguous (many species share / swap them), so by default a
+	-- confident auto-apply requires a confirmed Latin binomial. A common-name-only
+	-- taxon can still be confident if it recurs strongly (commonOnlyHits agreeing
+	-- hits); set high to effectively require a binomial.
+	commonOnlyHits = 6,
 	kingdoms = { -- allow-list: only living-thing kingdoms (GBIF only returns these anyway)
 		Animalia = true, Plantae = true, Fungi = true,
 		Chromista = true, Protozoa = true, Bacteria = true, Archaea = true,
@@ -85,6 +90,7 @@ function M.run( observations, deps, cfg )
 			agg.support = agg.support + ( c.score * kf * mf * rf )
 			agg.hits = agg.hits + ( c.hits or 1 )
 			if c.kind == 'scientific' then agg.sci = true else agg.common = true end
+				if c.authoritative then agg.authoritative = true end
 			-- Prefer a common name the recognition signal actually surfaced (a
 			-- 'common' candidate) over GBIF's arbitrary "first English" vernacular
 			-- from a scientific lookup — e.g. "Day octopus", not "Cyane's octopus".
@@ -113,11 +119,23 @@ function M.run( observations, deps, cfg )
 		return ( x.taxon.scientificName or '' ) < ( y.taxon.scientificName or '' )
 	end )
 
+	-- If the provider gave an authoritative answer (e.g. Lens's AI Overview names
+	-- the species), trust ONLY species it named — the visual-match titles surface
+	-- many binomial-bearing lookalikes that would otherwise auto-apply as false
+	-- positives. With no authoritative signal, fall back to binomial/agreement.
+	local hasAuthoritative = false
+	for _, a in ipairs( results ) do if a.authoritative then hasAuthoritative = true; break end end
+
 	local confident = {}
 	for _, a in ipairs( results ) do
+		-- A confident taxon needs a confirmed binomial OR strong agreement: a
+		-- common-name-only hit must recur (>= commonOnlyHits) across the evidence,
+		-- which rejects the incidental lookalikes the web titles surface.
+		local trusted = ( not hasAuthoritative ) or a.authoritative
 		a.confident = a.confidence >= cfg.autoApplyThreshold
 			and a.finalSupport >= cfg.minSupport
-			and ( a.sci or a.hits >= 2 )
+			and ( a.sci or a.hits >= cfg.commonOnlyHits )
+			and trusted
 		if a.confident then confident[ #confident + 1 ] = a end
 	end
 

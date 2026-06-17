@@ -53,6 +53,41 @@ describe( 'Identify.run', function()
 		assert.equal( 'Day octopus', r.top.taxon.commonName )
 	end )
 
+	it( 'trusts only the authoritative answer, suppressing title-only lookalikes', function()
+		-- The AI Overview (authoritative) names Octopus cyanea; the visual-match
+		-- titles surface a binomial-bearing lookalike (Octopus rubescens) that WOULD
+		-- otherwise auto-apply as a false positive.
+		local A = { usageKey = 1, scientificName = 'Octopus cyanea', genus = 'Octopus',
+			family = 'Octopodidae', kingdom = 'Animalia', rank = 'SPECIES', matchType = 'EXACT' }
+		local B = { usageKey = 2, scientificName = 'Octopus rubescens', genus = 'Octopus',
+			family = 'Octopodidae', kingdom = 'Animalia', rank = 'SPECIES', matchType = 'EXACT' }
+		local resolve = resolverFrom {
+			[ 'scientific:Octopus cyanea' ] = A,
+			[ 'scientific:Octopus rubescens' ] = B,
+		}
+		local lookalikeTitles = {
+			{ text = 'Red octopus (Octopus rubescens) - Wikipedia', kind = 'title', weight = 0.35 },
+			{ text = 'Red octopus (Octopus rubescens) - iNaturalist', kind = 'title', weight = 0.35 },
+			{ text = 'Pacific red octopus (Octopus rubescens) - guide', kind = 'title', weight = 0.35 },
+		}
+
+		-- without an authoritative answer, the well-supported lookalike IS confident
+		local plain = { { text = 'octopus (Octopus rubescens)', kind = 'title', weight = 0.35 } }
+		for _, t in ipairs( lookalikeTitles ) do plain[ #plain + 1 ] = t end
+		local r0 = Identify.run( plain, { resolve = resolve } )
+		local c0 = {}; for _, a in ipairs( r0.confident ) do c0[ a.taxon.scientificName ] = true end
+		assert.is_true( c0[ 'Octopus rubescens' ] )
+
+		-- add the authoritative AI Overview naming a DIFFERENT species: now only it is confident
+		local obs = { { text = 'This is a day octopus (Octopus cyanea).', kind = 'label',
+			weight = 2.0, authoritative = true } }
+		for _, t in ipairs( lookalikeTitles ) do obs[ #obs + 1 ] = t end
+		local r = Identify.run( obs, { resolve = resolve } )
+		local c = {}; for _, a in ipairs( r.confident ) do c[ a.taxon.scientificName ] = true end
+		assert.is_true( c[ 'Octopus cyanea' ] )       -- the authoritative answer
+		assert.is_nil( c[ 'Octopus rubescens' ] )     -- title-only lookalike suppressed
+	end )
+
 	it( 'falls back to review when nothing resolves', function()
 		local r = Identify.run(
 			{ { text = 'Coral reef', kind = 'label', weight = 1.0 } },

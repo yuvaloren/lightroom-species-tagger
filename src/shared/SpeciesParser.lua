@@ -182,7 +182,10 @@ function M.candidates( observations, opts )
 
 	local acc = {} -- key (kind:normname) -> entry
 
-	local function bump( name, kind, weight )
+	-- `authoritative` marks a candidate that came from an authoritative observation
+	-- (obs.authoritative — e.g. Google Lens's AI Overview, its single best answer),
+	-- so the scorer can trust it over noisy supporting matches.
+	local function bump( name, kind, weight, authoritative )
 		if not name or name == '' then return end
 		local key = kind .. ':' .. normKey( name )
 		local e = acc[ key ]
@@ -192,10 +195,12 @@ function M.candidates( observations, opts )
 		end
 		e.score = e.score + weight
 		e.hits = e.hits + 1
+		if authoritative then e.authoritative = true end
 	end
 
 	for _, obs in ipairs( observations or {} ) do
 		local ow = obs.weight or 1.0
+		local auth = obs.authoritative
 		-- scientific channel. Always scan the text as-is; for short "label" text
 		-- (e.g. Vision bestGuessLabels) also scan a first-letter-capitalized copy
 		-- so an all-lower-case binomial is still seen. De-dup within the obs.
@@ -210,7 +215,7 @@ function M.candidates( observations, opts )
 				if not seenSci[ k ] then
 					seenSci[ k ] = true
 					local mult = sci.strong and w.strongCtx or 1.0
-					bump( sci.name, 'scientific', ow * w.scientific * mult )
+					bump( sci.name, 'scientific', ow * w.scientific * mult, auth )
 				end
 			end
 		end
@@ -218,10 +223,10 @@ function M.candidates( observations, opts )
 		local common
 		if obs.kind == 'title' then
 			common = commonFromTitle( obs.text )
-			if common then bump( titleCommon( common ), 'common', ow * w.commonTitle ) end
+			if common then bump( titleCommon( common ), 'common', ow * w.commonTitle, auth ) end
 		else -- 'label' / 'entity' / anything else: treat the text as a clean-ish label
 			common = cleanCommon( obs.text )
-			if common then bump( titleCommon( common ), 'common', ow * w.commonLabel ) end
+			if common then bump( titleCommon( common ), 'common', ow * w.commonLabel, auth ) end
 		end
 	end
 
