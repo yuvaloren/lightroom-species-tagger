@@ -25,3 +25,6 @@ luacov.report.out
 
 # macOS
 .DS_Store
+
+# Cached live Google Lens captures for offline accuracy tuning (real photos).
+/spec/fixtures/live/
