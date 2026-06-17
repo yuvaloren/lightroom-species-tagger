@@ -16,8 +16,9 @@ M.DEFAULTS = {
 	plantNetKey = '',
 	plantNetProject = 'all', -- Pl@ntNet flora project ('all' = worldwide)
 
-	-- Google Lens session cookie, pasted from a browser where Lens works (Lens has
-	-- no anonymous API; the plugin shells out to curl with this cookie).
+	-- OPTIONAL Google Lens cookie fallback. Lens normally self-generates a session
+	-- (the curl transport warms up cookies from google.com); paste a browser Cookie
+	-- value here only if your network refuses the self-generated one.
 	lensCookie = '',
 	-- Lens locale (passed to the direct Google Lens upload)
 	lensCountry = 'us',
@@ -51,11 +52,8 @@ end
 -- Returns ok, message.
 function M.validate( cfg )
 	if cfg.backend == 'lens' then
-		if not cfg.lensCookie or cfg.lensCookie == '' then
-			return false, 'Google Lens needs your browser session cookie (it has no anonymous API). ' ..
-				'In a browser where Lens works, copy the Cookie header for lens.google.com and paste ' ..
-				'it into the plugin settings — or switch to the Pl@ntNet / Vision backend.'
-		end
+		-- Lens self-generates a session (curl warms up cookies from google.com),
+		-- so no credential is required. The optional lensCookie is only a fallback.
 		return true
 	elseif cfg.backend == 'vision' then
 		if not cfg.visionApiKey or cfg.visionApiKey == '' then

@@ -14,12 +14,14 @@ third-party image host — the bytes go straight to the recognition service.
 - The downsized JPEG **bytes** are uploaded directly to `lens.google.com`
   (multipart, the same endpoint the Lens website uses); the results page is then
   read back and parsed locally.
-- Because Lens has no anonymous API, the plugin **shells out to `curl`** and sends
-  the **Google session cookie you pasted in settings** (so Google treats it like
-  your browser). That cookie is stored in Lightroom's plugin preferences on your
-  machine and sent only to Google; it is redacted in logs. No API key and no
-  third-party host are involved. This is automated access to a consumer Google
-  surface, so Google may rate-limit or block it; nothing is sent anywhere else.
+- Because Lens has no anonymous API, the plugin **shells out to `curl`** and
+  **self-generates a Google session** — a warm-up request to google.com yields
+  fresh cookies (held in a temporary cookie jar that is deleted), like a fresh
+  incognito window. No API key, no third-party host. Optionally you may paste a
+  browser Cookie value as a fallback; if set, it's stored in Lightroom's plugin
+  preferences on your machine, sent only to Google, and redacted in logs. This is
+  automated access to a consumer Google surface, so Google may rate-limit or block
+  it; nothing is sent anywhere else.
 
 ### Pl@ntNet backend
 - The downsized JPEG **bytes** are uploaded to `my-api.plantnet.org` with your

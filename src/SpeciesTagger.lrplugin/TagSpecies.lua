@@ -108,7 +108,7 @@ end
 -- Get observations for one photo from the configured provider. Vision sends the
 -- bytes inline; Lens and Pl@ntNet upload them as a multipart file, so those need
 -- a temp JPEG on disk (cleaned up afterwards).
-local function observe( photo, cfg, http )
+local function observe( photo, cfg, providerHttp )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
 
@@ -118,14 +118,6 @@ local function observe( photo, cfg, http )
 		local werr
 		file, werr = writeTempJpeg( bytes )
 		if not file then return nil, 'temp file: ' .. tostring( werr ) end
-	end
-
-	-- Google Lens needs a real browser session, which LrHttp can't drive (it drops
-	-- the session cookie across the upload→results redirect), so use the curl
-	-- transport with the user's pasted cookie. Other backends use LrHttp.
-	local providerHttp = http
-	if provider.needsCookie then
-		providerHttp = Http.curlAdapter( { cookie = cfg.lensCookie } )
 	end
 
 	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), { http = providerHttp } )
@@ -153,6 +145,14 @@ function M.run( _ )
 	end
 
 	local http = Http.lrAdapter()
+	-- Lens drives Google through a self-generating browser session via curl (LrHttp
+	-- can't hold the session across the upload→results redirect); build it ONCE per
+	-- run so the warm-up + cookie jar are shared across photos. Other backends and
+	-- all GBIF lookups use LrHttp.
+	local providerHttp = http
+	if Providers.get( cfg.backend ).usesCurlTransport then
+		providerHttp = Http.curlAdapter( { cookie = cfg.lensCookie } )
+	end
 	local resolveCache = {} -- shared GBIF cache for the whole run
 	local resolveDeps = { http = http, cache = resolveCache }
 	local identCfg = { autoApplyThreshold = cfg.autoApplyThreshold }
@@ -169,7 +169,7 @@ function M.run( _ )
 		progress:setPortionComplete( i - 1, #photos )
 		progress:setCaption( fileName( photo ) )
 
-		local obs, err = observe( photo, cfg, http )
+		local obs, err = observe( photo, cfg, providerHttp )
 		if not obs then
 			nError = nError + 1
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )

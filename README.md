@@ -49,7 +49,7 @@ reef shot with a fish *and* an octopus gets both.
 
 | Backend | What it is | Cost / setup | Coverage | Notes |
 |---|---|---|---|---|
-| **Google Lens (browser session)** *(default)* | Talks to Google Lens directly — uploads the image and harvests the match data from the results page | **Free, no key**, but you paste your **browser session cookie** (macOS/Linux; uses `curl`) | plants + animals | Closest to the Lens app; best-effort (see below) |
+| **Google Lens** *(default)* | Talks to Google Lens directly — uploads the image and harvests the match data from the results page | **Free, no key** — self-generates a Google session via `curl` (macOS/Linux); optional cookie fallback | plants + animals | Closest to the Lens app; best-effort (see below) |
 | **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; returns clean scientific + common names |
 | **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, ToS-clean; opt in only if a card is OK |
 
@@ -58,23 +58,25 @@ All three send the image bytes directly (no third-party image host) and feed the
 testable regardless of backend.
 
 > **On the default (Google Lens):** there is no official Google Lens API, and
-> Google requires a genuine **browser session** to use Lens (real cookies; even
-> Safari works, so Chrome integrity headers aren't needed — the session is what
-> matters). The plugin can't fake that, so it **shells out to `curl` with a cookie
-> you paste** (from a browser where lens.google.com works — see Settings). This is
-> best-effort: a stale cookie or a flagged network makes a photo fall through to
-> *needs review* (it never crashes), and you can switch to Pl@ntNet/Vision. The
-> parser harvests names (rather than walking fragile fixed offsets), so it degrades
-> gracefully when Google changes the page. macOS/Linux only for now (`curl` + POSIX
-> shell). You can also validate/refresh the offline corpus from your session with
-> `just refresh-fixtures`.
+> Google requires a genuine **browser session** (real cookies; even Safari works,
+> so it's the session that matters, not Chrome-specific headers). The plugin can't
+> use `LrHttp` for this (it drops the session cookie across the upload→results
+> redirect), so it **shells out to `curl`** and **self-generates a session** — a
+> warm-up request to google.com yields fresh cookies, exactly like a fresh
+> incognito window. No key, no paste. (If your network refuses the self-generated
+> session, paste a browser Cookie value in settings as a fallback.) Best-effort: a
+> flagged network makes a photo fall through to *needs review* (it never crashes),
+> and you can switch to Pl@ntNet/Vision. The parser harvests names (rather than
+> walking fragile fixed offsets), so it degrades gracefully when Google changes the
+> page. macOS/Linux only for now (`curl` + POSIX shell). You can validate/refresh
+> the offline corpus the same way with `just refresh-fixtures`.
 
 ## Requirements
 
 - Adobe Lightroom Classic (built against SDK ≥ 6 APIs).
 - For the backend you pick:
-  - **Google Lens (default):** no key, but paste your **browser session cookie**
-    in settings (macOS/Linux; needs `curl` on PATH). Lens has no anonymous API.
+  - **Google Lens (default):** no key, no setup — self-generates a Google session
+    (macOS/Linux; needs `curl` on PATH). Optional cookie fallback in settings.
   - **Pl@ntNet:** a free [Pl@ntNet](https://my.plantnet.org/) API key (no credit card).
   - **Vision:** a [Google Cloud Vision](https://cloud.google.com/vision) API key
     (requires a GCP project with billing enabled).

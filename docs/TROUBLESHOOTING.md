@@ -5,23 +5,15 @@ The selected backend needs a key. Open **Plug-in Manager → Species Tagger** an
 paste the key for the backend you chose — or switch the backend to **Google Lens
 (direct)**, which needs no key.
 
-### “Google Lens needs your browser session cookie …”
-Lens has no anonymous API, so the plugin uses your browser session. In a browser
-where lens.google.com works: DevTools → Network → run a Lens image search → click
-the `upload` request → copy its **Cookie** header value → paste it into
-**Plug-in Manager → Species Tagger → Lens cookie**. (macOS/Linux; needs `curl` on
-PATH.) Or switch to Pl@ntNet / Vision.
-
-### “… did not associate the upload with your session …” / “Re-upload the image”
-Your Lens cookie is expired or incomplete. Re-copy it from your browser (as above)
-and paste the fresh value. Make sure you copied the **whole** Cookie header
-(include `NID` and `AEC`).
-
-### “Google Lens blocked this request (403 / consent)” or “rate-limiting … unusual traffic”
-Google refused the request — usually a stale cookie, or a shared/VPN/datacenter
-network. Options:
-- Refresh the Lens cookie, run from a normal home connection in smaller
-  selections, and wait before retrying (limits clear within minutes to hours).
+### Google Lens: “blocked (403 / consent)”, “rate-limiting … unusual traffic”, or “not associated … re-upload”
+Lens self-generates a Google session, but your network refused it (common on
+shared/VPN/datacenter connections, or behind CGNAT). Options, in order:
+- Run from a normal home connection in smaller selections, and wait before
+  retrying (limits clear within minutes to hours). Needs `curl` on PATH (macOS/Linux).
+- Provide the optional cookie fallback: in a browser where lens.google.com works,
+  DevTools → Network → run a Lens image search → click the `upload` request → copy
+  its whole **Cookie** header value (include `NID` and `AEC`) → paste into
+  **Plug-in Manager → Species Tagger → Lens cookie**.
 - Switch the backend to **Pl@ntNet** (plants) or **Google Vision** for a
   sanctioned, key-based API that isn't rate-limited this way.
 The affected photos are left at **needs review**, not mis-tagged.

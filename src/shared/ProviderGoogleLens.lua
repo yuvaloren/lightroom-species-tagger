@@ -34,8 +34,8 @@ local json = require 'dkjson'
 local M = {
 	id = 'lens',
 	label = 'Google Lens (direct, browser session)',
-	needsImageFile = true,  -- uploads bytes as a multipart file (no image host)
-	needsCookie = true,     -- needs your Google session cookie (Lens has no anonymous API)
+	needsImageFile = true,    -- uploads bytes as a multipart file (no image host)
+	usesCurlTransport = true, -- needs a real browser session; driven via curl, not LrHttp
 	UPLOAD_URL = 'https://lens.google.com/v3/upload',
 	-- Google Lens has no anonymous endpoint: it requires a real browser SESSION.
 	-- A Safari UA is used (Safari works without Chrome's x-client-data /

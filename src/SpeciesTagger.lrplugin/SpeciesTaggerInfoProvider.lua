@@ -34,19 +34,22 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:popup_menu { value = bind 'backend', items = backendItems },
 			},
 			f:static_text {
-				title = 'Google Lens needs your browser session (it has no anonymous API): the plugin ' ..
-					'shells out to curl with the cookie you paste below. Pl@ntNet (plants) and Google ' ..
-					'Vision instead use their own key. See docs/PRIVACY.md for what leaves your machine.',
+				title = 'Google Lens needs no key: the plugin shells out to curl and generates its own ' ..
+					'Google session (like a fresh incognito window), so just pick it. Pl@ntNet (plants) ' ..
+					'and Google Vision use their own key below. (Lens is macOS/Linux; needs curl on PATH.) ' ..
+					'See docs/PRIVACY.md for what leaves your machine.',
 				wrap = true, width = 540, height_in_lines = 3,
 			},
 			f:row {
 				f:static_text { title = 'Lens cookie:', width = labelW, alignment = 'right' },
 				f:password_field { value = bind 'lensCookie', width_in_chars = 40 },
+				f:static_text { title = '(optional fallback)' },
 			},
 			f:static_text {
-				title = 'For Lens: in a browser where lens.google.com works, open DevTools → Network, ' ..
-					'do a Lens image search, click the "upload" request, and copy its Cookie header ' ..
-					'value here. Re-paste when it expires. (macOS/Linux; needs curl on PATH.)',
+				title = 'Leave the Lens cookie blank to use a self-generated session. Only if your ' ..
+					'network refuses it: in a browser where lens.google.com works, open DevTools → ' ..
+					'Network, do a Lens image search, click the "upload" request, and paste its Cookie ' ..
+					'header value here.',
 				wrap = true, width = 540, height_in_lines = 3,
 			},
 			f:row {

@@ -7,23 +7,24 @@ signal and then adds a real taxonomy resolver (GBIF) and a confidence model on
 top, so the output is canonical names rather than free-text guesses.
 
 ### Does it cost money? Do I need an API key?
-No money, and no API key for the default **Google Lens** backend — but Lens has
-no anonymous API, so you paste your **browser session cookie** once (from a
-browser where lens.google.com works) and the plugin uses `curl` with it
-(macOS/Linux). GBIF (the taxonomy) is free and keyless. The other backends use
-their own key: **Pl@ntNet** is a free key (500/day, no credit card); **Google
-Vision** needs a Google Cloud project with billing enabled (a card on file;
-~1,000 images/month free, then paid).
+No money, and no key or setup for the default **Google Lens** backend. Lens has
+no anonymous API, so the plugin shells out to `curl` and **self-generates a Google
+session** (a warm-up request yields fresh cookies, like a fresh incognito window).
+GBIF (the taxonomy) is free and keyless. The other backends use their own key:
+**Pl@ntNet** is a free key (500/day, no credit card); **Google Vision** needs a
+Google Cloud project with billing enabled (a card on file; ~1,000 images/month
+free, then paid).
 
-### How do I get the Lens cookie, and is it reliable?
-In a browser where lens.google.com works: open DevTools → Network, run a Lens
-image search, click the `upload` request, and copy its **Cookie** header value
-into the plugin's **Lens cookie** setting. Re-paste when it expires. It's
-**best-effort**: Google requires a genuine browser session (real cookies; even
-Safari works, so it's the session, not Chrome-specific headers, that matters). A
-stale cookie or a flagged/datacenter network makes the photo fall through to
-**needs review** — it never crashes or double-tags. If you hit this often, use
-Pl@ntNet (plants) or Vision.
+### Is the Lens backend reliable? What's the optional cookie for?
+It's **best-effort**: Google requires a genuine browser session, which the
+self-generated one usually satisfies (even Safari works, so it's the session, not
+Chrome-specific headers, that matters). A flagged/datacenter network can still
+refuse it, in which case the photo falls through to **needs review** — it never
+crashes or double-tags. For that case there's an **optional fallback**: in a
+browser where lens.google.com works, open DevTools → Network, run a Lens search,
+click the `upload` request, copy its **Cookie** header into the plugin's *Lens
+cookie* setting. Or just use Pl@ntNet (plants) / Vision. macOS/Linux only (needs
+`curl`).
 
 ### Lens vs Pl@ntNet vs Vision — which should I use?
 - **Lens (direct):** free, no key, broad coverage (plants + animals), closest to
