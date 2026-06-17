@@ -5,18 +5,22 @@ The selected backend needs a key. Open **Plug-in Manager → Species Tagger** an
 paste the key for the backend you chose — or switch the backend to **Google Lens
 (direct)**, which needs no key.
 
-### Google Lens: “blocked (403 / consent)”, “rate-limiting … unusual traffic”, or “not associated … re-upload”
-Lens self-generates a Google session, but your network refused it (common on
-shared/VPN/datacenter connections, or behind CGNAT). Options, in order:
-- Run from a normal home connection in smaller selections, and wait before
-  retrying (limits clear within minutes to hours). Needs `curl` on PATH (macOS/Linux).
-- Provide the optional cookie fallback: in a browser where lens.google.com works,
-  DevTools → Network → run a Lens image search → click the `upload` request → copy
-  its whole **Cookie** header value (include `NID` and `AEC`) → paste into
-  **Plug-in Manager → Species Tagger → Lens cookie**.
-- Switch the backend to **Pl@ntNet** (plants) or **Google Vision** for a
-  sanctioned, key-based API that isn't rate-limited this way.
-The affected photos are left at **needs review**, not mis-tagged.
+### Google Lens: “helper produced no output” / “is Node and Google Chrome installed?”
+The Lens backend drives your installed Chrome via a bundled Node helper. Check:
+- **Node + Chrome installed**, and the helper's deps: `cd scripts/lens && npm i`.
+- If `node` isn't found (Lightroom's GUI has a minimal PATH), set the **node path**
+  in **Plug-in Manager → Species Tagger** (e.g. `/opt/homebrew/bin/node`).
+- Run from a normal home connection — Google blocks datacenter/VPN/shared IPs.
+- macOS/Linux only for now.
+Or switch the backend to **Pl@ntNet** (plants) or **Google Vision**. Affected
+photos are left at **needs review**, not mis-tagged.
+
+### Lens over-tags / tags the wrong species
+Real Lens returns many related species per image, so the scorer can apply extras.
+Raise the **Auto-apply** threshold so only strong hits apply, run `just
+live-accuracy` to see how it does on your photos, and prefer cropping to one
+subject. (The offline corpus is representative and won't show this; real captures
+do.)
 
 ### Everything comes back “species: needs review”
 Nothing cleared the confidence threshold. Common causes:

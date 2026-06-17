@@ -122,12 +122,14 @@ print( 'Recording ' .. provider .. ' fixture for ' .. image )
 local decoded, providerRel
 
 if provider == 'lens' then
-	local Lens = Providers.get( 'lens' )
-	-- Reuse the real provider flow: upload bytes, follow the redirect, extract the
-	-- embedded results JSON. Save THAT (not the multi-MB HTML page).
-	local d, err = Lens.fetch( { imageFile = image, hl = 'en', country = 'us' }, { http = http } )
-	if not d then die( 'lens fetch failed: ' .. tostring( err ) ) end
-	decoded = d
+	-- Lens has no API + JS-rendered results, so capture via the browser helper
+	-- (scripts/lens): it returns JSON { ok, strings } — the strings are what the
+	-- offline parser harvests, so save them as the fixture. Needs node + Chrome.
+	local raw = run( 'node ' .. shquote( 'scripts/lens/lens-search.js' ) .. ' ' .. shquote( image ) .. ' 2>/dev/null' )
+	local d = raw and raw ~= '' and json.decode( raw )
+	if type( d ) ~= 'table' then die( 'lens helper produced no/!bad output (run `cd scripts/lens && npm i`?)' ) end
+	if not d.ok then die( 'lens helper: ' .. tostring( d.error ) ) end
+	decoded = d.strings
 	providerRel = 'lens/' .. id .. '.json'
 	save( providerRel, json.encode( decoded, { indent = true } ) )
 elseif provider == 'plantnet' then

@@ -7,24 +7,23 @@ signal and then adds a real taxonomy resolver (GBIF) and a confidence model on
 top, so the output is canonical names rather than free-text guesses.
 
 ### Does it cost money? Do I need an API key?
-No money, and no key or setup for the default **Google Lens** backend. Lens has
-no anonymous API, so the plugin shells out to `curl` and **self-generates a Google
-session** (a warm-up request yields fresh cookies, like a fresh incognito window).
-GBIF (the taxonomy) is free and keyless. The other backends use their own key:
-**Pl@ntNet** is a free key (500/day, no credit card); **Google Vision** needs a
-Google Cloud project with billing enabled (a card on file; ~1,000 images/month
-free, then paid).
+No money, and no API key for the default **Google Lens** backend — but it needs
+**Node.js + Google Chrome** installed and a one-time `cd scripts/lens && npm i`,
+because Lens has no API and renders results with JavaScript, so the plugin drives
+your real Chrome (headless) to run the search. GBIF (the taxonomy) is free and
+keyless. The other backends use their own key: **Pl@ntNet** is a free key
+(500/day, no credit card); **Google Vision** needs a Google Cloud project with
+billing enabled (a card on file; ~1,000 images/month free, then paid).
 
-### Is the Lens backend reliable? What's the optional cookie for?
-It's **best-effort**: Google requires a genuine browser session, which the
-self-generated one usually satisfies (even Safari works, so it's the session, not
-Chrome-specific headers, that matters). A flagged/datacenter network can still
-refuse it, in which case the photo falls through to **needs review** — it never
-crashes or double-tags. For that case there's an **optional fallback**: in a
-browser where lens.google.com works, open DevTools → Network, run a Lens search,
-click the `upload` request, copy its **Cookie** header into the plugin's *Lens
-cookie* setting. Or just use Pl@ntNet (plants) / Vision. macOS/Linux only (needs
-`curl`).
+### Is the Lens backend reliable? How accurate is it?
+It's **best-effort**. Run it from a normal home connection (Google blocks
+datacenter/VPN IPs); on any failure the photo falls through to **needs review** —
+it never crashes or double-tags. Accuracy: the offline test corpus is
+*representative* (deterministic, 100%), but real Lens captures score lower — Lens
+returns many related species per image, so the scorer misses some (common-name-
+only animals) and over-tags others. Measure the real numbers on your own photos
+with `just live-accuracy`. If Lens is flaky for your subjects, use Pl@ntNet
+(plants) or Vision. macOS/Linux only.
 
 ### Lens vs Pl@ntNet vs Vision — which should I use?
 - **Lens (direct):** free, no key, broad coverage (plants + animals), closest to

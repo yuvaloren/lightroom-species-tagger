@@ -49,34 +49,38 @@ reef shot with a fish *and* an octopus gets both.
 
 | Backend | What it is | Cost / setup | Coverage | Notes |
 |---|---|---|---|---|
-| **Google Lens** *(default)* | Talks to Google Lens directly — uploads the image and harvests the match data from the results page | **Free, no key** — self-generates a Google session via `curl` (macOS/Linux); optional cookie fallback | plants + animals | Closest to the Lens app; best-effort (see below) |
-| **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; returns clean scientific + common names |
+| **Google Lens** *(default)* | Drives your installed Chrome (headless) through a Lens image search and harvests the match text | **Free, no key**; needs **Node.js + Google Chrome** (macOS/Linux) | plants + animals | Closest to the Lens app; best-effort (see below) |
+| **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; clean scientific + common names |
 | **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, ToS-clean; opt in only if a card is OK |
 
-All three send the image bytes directly (no third-party image host) and feed the
-**identical** parser → GBIF → scorer pipeline, so the accuracy logic is shared and
-testable regardless of backend.
+All three feed the **identical** parser → GBIF → scorer pipeline, so the accuracy
+logic is shared and testable regardless of backend.
 
-> **On the default (Google Lens):** there is no official Google Lens API, and
-> Google requires a genuine **browser session** (real cookies; even Safari works,
-> so it's the session that matters, not Chrome-specific headers). The plugin can't
-> use `LrHttp` for this (it drops the session cookie across the upload→results
-> redirect), so it **shells out to `curl`** and **self-generates a session** — a
-> warm-up request to google.com yields fresh cookies, exactly like a fresh
-> incognito window. No key, no paste. (If your network refuses the self-generated
-> session, paste a browser Cookie value in settings as a fallback.) Best-effort: a
-> flagged network makes a photo fall through to *needs review* (it never crashes),
-> and you can switch to Pl@ntNet/Vision. The parser harvests names (rather than
-> walking fragile fixed offsets), so it degrades gracefully when Google changes the
-> page. macOS/Linux only for now (`curl` + POSIX shell). You can validate/refresh
-> the offline corpus the same way with `just refresh-fixtures`.
+> **On the default (Google Lens):** there is no official Lens API, and Lens
+> results are rendered by **JavaScript**, so a plain HTTP client (curl /
+> Lightroom's `LrHttp`) can't read them. The plugin therefore drives a **real
+> browser**: a small Node helper ([scripts/lens](scripts/lens)) uploads the image,
+> transplants the anonymous session into your installed **Google Chrome**
+> (headless), lets it render the JS, and returns the match text — no key, no login,
+> no cookie paste. **One-time setup:** `cd scripts/lens && npm i` (and have Chrome).
+> It's **best-effort**: run it from a normal home connection (Google blocks
+> datacenter/VPN IPs); on any failure the photo falls through to *needs review* (it
+> never crashes), and you can switch to Pl@ntNet/Vision. macOS/Linux only for now.
+> Measure the real Lens accuracy on your own photos with `just live-accuracy`.
+
+> **Accuracy reality check:** the offline test corpus is *representative* (it
+> exercises the pipeline deterministically at 100%). On **real** Lens captures,
+> recall/precision are lower — Lens returns many related species per image, so the
+> scorer both misses some (common-name-only animals) and over-tags others. `just
+> live-accuracy` reports the honest numbers; tuning the scorer for real Lens output
+> is an open improvement.
 
 ## Requirements
 
 - Adobe Lightroom Classic (built against SDK ≥ 6 APIs).
 - For the backend you pick:
-  - **Google Lens (default):** no key, no setup — self-generates a Google session
-    (macOS/Linux; needs `curl` on PATH). Optional cookie fallback in settings.
+  - **Google Lens (default):** no key, but needs **Node.js + Google Chrome**
+    installed (macOS/Linux). One-time: `cd scripts/lens && npm i`.
   - **Pl@ntNet:** a free [Pl@ntNet](https://my.plantnet.org/) API key (no credit card).
   - **Vision:** a [Google Cloud Vision](https://cloud.google.com/vision) API key
     (requires a GCP project with billing enabled).
@@ -143,23 +147,22 @@ lua scripts/record-fixture.lua spec/fixtures/images/yourshot.jpg --provider lens
 **No — by default they are *representative*, not live Google captures.** The GBIF
 fixtures are real, but the `spec/fixtures/lens/*.json` blobs are generated
 (`scripts/build-corpus.lua`'s `lensBlob`) — seeded with the correct species names
-plus noise — because Google blocks automated Lens access from datacenter/CI IPs.
-So the offline 100% number proves the **parser → GBIF → scorer pipeline** works on
-Lens-shaped input; it is **not** a measurement of real Google Lens recall.
+plus noise. So the offline 100% number proves the **parser → GBIF → scorer
+pipeline** works on Lens-shaped input; it is **not** a measurement of real Lens
+recall.
 
-To measure (and verify) the real thing, refresh the fixtures from live Google Lens
-on a **residential** connection:
+To measure the real thing on your own photos (drop originals in
+`spec/fixtures/images/`, then on a **residential** connection):
 
 ```
-just refresh-fixtures          # = build-corpus.lua --corpus --live
-just accuracy                  # now scores the REAL captures against the ground truth
+cd scripts/lens && npm i        # one-time (puppeteer-core; uses your Chrome)
+just live-accuracy              # runs real Google Lens per image, scores vs ground truth
 ```
 
-This overwrites each corpus `lens/*.json` with Google's actual output and saves
-Google's **raw HTML** to `spec/fixtures/lens/raw/<case>.html` so you can audit that
-the captures are genuinely Google's and that the parser extracts them faithfully
-(neither is committed). The `expected` labels stay the human ground truth, so the
-accuracy run can legitimately come in below 100% — that's the honest signal.
+`live-accuracy` **writes nothing** — it drives your Chrome through a real Lens
+search for each ground-truth image and reports recall / top-1 / genus / family /
+false-positives. The numbers are honestly lower than the representative 100%
+(Lens returns many related species), which is the real signal.
 
 ## Building & developing
 

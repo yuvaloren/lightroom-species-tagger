@@ -34,23 +34,16 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:popup_menu { value = bind 'backend', items = backendItems },
 			},
 			f:static_text {
-				title = 'Google Lens needs no key: the plugin shells out to curl and generates its own ' ..
-					'Google session (like a fresh incognito window), so just pick it. Pl@ntNet (plants) ' ..
-					'and Google Vision use their own key below. (Lens is macOS/Linux; needs curl on PATH.) ' ..
+				title = 'Google Lens needs no key — the plugin drives your installed Google Chrome ' ..
+					'(headless) to run a Lens image search. It needs Node.js + Google Chrome on this ' ..
+					'machine (macOS/Linux). Pl@ntNet (plants) and Google Vision use their own key below. ' ..
 					'See docs/PRIVACY.md for what leaves your machine.',
 				wrap = true, width = 540, height_in_lines = 3,
 			},
 			f:row {
-				f:static_text { title = 'Lens cookie:', width = labelW, alignment = 'right' },
-				f:password_field { value = bind 'lensCookie', width_in_chars = 40 },
-				f:static_text { title = '(optional fallback)' },
-			},
-			f:static_text {
-				title = 'Leave the Lens cookie blank to use a self-generated session. Only if your ' ..
-					'network refuses it: in a browser where lens.google.com works, open DevTools → ' ..
-					'Network, do a Lens image search, click the "upload" request, and paste its Cookie ' ..
-					'header value here.',
-				wrap = true, width = 540, height_in_lines = 3,
+				f:static_text { title = 'node path:', width = labelW, alignment = 'right' },
+				f:edit_field { value = bind 'nodePath', width_in_chars = 40 },
+				f:static_text { title = '(Lens; blank = auto)' },
 			},
 			f:row {
 				f:static_text { title = 'Pl@ntNet key:', width = labelW, alignment = 'right' },
@@ -60,13 +53,6 @@ function M.sectionsForTopOfDialog( f, _ )
 			f:row {
 				f:static_text { title = 'Google Vision key:', width = labelW, alignment = 'right' },
 				f:password_field { value = bind 'visionApiKey', width_in_chars = 40 },
-			},
-			f:row {
-				f:static_text { title = 'Lens locale:', width = labelW, alignment = 'right' },
-				f:edit_field { value = bind 'lensHl', width_in_chars = 4 },
-				f:static_text { title = '/' },
-				f:edit_field { value = bind 'lensCountry', width_in_chars = 4 },
-				f:static_text { title = '(language / country)' },
 			},
 		},
 		{

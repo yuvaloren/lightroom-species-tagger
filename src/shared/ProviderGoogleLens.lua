@@ -1,59 +1,32 @@
 --[[----------------------------------------------------------------------------
 ProviderGoogleLens.lua
-Google Lens results WITHOUT any paid API — we talk to Google Lens directly.
+Google Lens results WITHOUT any paid API.
 
-The image bytes are POSTed (multipart, field `encoded_image`) to
-https://lens.google.com/v3/upload; Google answers with a redirect to a results
-page whose HTML embeds the match data inside `AF_initDataCallback({... data:[…]})`
-script blocks. fetch() pulls that embedded JSON out of the HTML; parse() then
-harvests the human-readable strings from it (best-guess label + the titles of the
-pages showing the same image) and hands them to the shared parser/GBIF/scorer.
+Google Lens has no anonymous API and its results page is rendered by JavaScript,
+so it can't be read by a plain HTTP client (curl or Lightroom's LrHttp only get
+the "enable JavaScript" shell). It IS reachable through a real browser: the
+companion helper `scripts/lens/lens-search.js` uploads the image, transplants the
+anonymous session into the user's installed Chrome, lets Chrome render the JS
+results, and returns the visible match strings. That helper is injected here as
+`deps.lensSearch( imageFile ) -> strings[], err`.
 
-Why harvest strings instead of walking fixed array offsets? Google's Lens layout
-is undocumented and the nested indices move without notice (a big change landed
-Feb 2025). Rather than hard-code `data[0][1][8][12][0]` and break silently, we
-walk the whole decoded structure and keep every string that looks like a name or
-page title. That is deliberately recall-oriented and noisy — precision is the
-job of the downstream pipeline (binomial detection + GBIF gating + the scorer),
-which already treats provider output as untrusted. Layout drift then degrades
-recall gracefully instead of returning confident garbage.
+This module's job is the PURE part: take those match strings (page titles, the AI
+overview, etc.) and harvest name candidates from them — deliberately recall-
+oriented and noisy, because precision is the downstream pipeline's job (binomial
+detection + GBIF gating + the scorer, which treat provider output as untrusted).
 
-Reliability note: Google actively blocks automated access (SearchGuard JS
-challenges, consent walls, datacenter-IP throttling). From a normal residential
-connection a few occasional, throttled requests usually succeed; when Google
-blocks or changes the page, fetch() returns a clear error / parse() returns
-nothing and the photo simply falls through to "needs review" — it never crashes.
-This backend needs no key and uploads the bytes directly, so no API key and no
-image host are involved.
-
-parse()/extractData() are pure; fetch()/identify() use the injected deps.http.
+parse() is pure and unit-tested; identify() calls the injected deps.lensSearch.
 ------------------------------------------------------------------------------]]
-
-local json = require 'dkjson'
 
 local M = {
 	id = 'lens',
-	label = 'Google Lens (direct, browser session)',
-	needsImageFile = true,    -- uploads bytes as a multipart file (no image host)
-	usesCurlTransport = true, -- needs a real browser session; driven via curl, not LrHttp
-	UPLOAD_URL = 'https://lens.google.com/v3/upload',
-	-- Google Lens has no anonymous endpoint: it requires a real browser SESSION.
-	-- A Safari UA is used (Safari works without Chrome's x-client-data /
-	-- x-browser-validation integrity headers, so we don't need to forge those —
-	-- the session cookie is what matters). The cookie is supplied by the caller
-	-- (the Lightroom curl transport injects the user's pasted cookie).
-	USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' ..
-		'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15',
+	label = 'Google Lens (browser, no key)',
+	needsImageFile = true,  -- the helper takes an image file path
+	usesLensHelper = true,  -- driven via the browser helper, not deps.http
 }
 
 --------------------------------------------------------------------------------
 -- pure helpers
-
-local function urlencode( s )
-	return ( tostring( s ):gsub( '[^%w%-_%.~]', function( c )
-		return string.format( '%%%02X', string.byte( c ) )
-	end ) )
-end
 
 -- Is this string a plausible name / page-title candidate (vs. a token, URL,
 -- id, hash, css, etc.)? Deliberately permissive — the shared parser + GBIF do
@@ -64,7 +37,7 @@ local function isCandidate( s )
 	if n < 3 or n > 120 then return false end
 	if s:find( '://' ) or s:find( 'www%.' ) then return false end  -- URLs
 	if s:find( '[<>{}=;\\]' ) then return false end                -- markup / code
-	if s:find( ':' ) and not s:find( '%s' ) then return false end  -- key:val tokens (e.g. ds:0)
+	if s:find( ':' ) and not s:find( '%s' ) then return false end  -- key:val tokens
 	if s:find( '@' ) or s:find( '#' ) then return false end        -- handles / ids
 	if not s:find( '%l' ) then return false end                    -- needs a lower-case letter
 	if not s:find( '%a%a' ) then return false end                  -- needs real letters
@@ -75,8 +48,8 @@ local function isCandidate( s )
 end
 M._isCandidate = isCandidate
 
--- Walk a decoded JSON structure and return the unique candidate strings in a
--- deterministic, first-seen order (sequence parts before map parts).
+-- Walk a value (string, or a list/tree of strings) and return the unique
+-- candidate strings in deterministic first-seen order.
 local function harvest( decoded )
 	local seen, order = {}, {}
 	local function walk( v, depth )
@@ -102,62 +75,12 @@ local function harvest( decoded )
 end
 M._harvest = harvest
 
--- Slice a balanced [...] (or {...}) starting at byte index `i`, honouring JSON
--- string quoting so brackets inside strings don't confuse the depth counter.
-local function balancedSlice( s, i )
-	local depth, n = 0, #s
-	local inStr, esc = false, false
-	for j = i, n do
-		local c = s:sub( j, j )
-		if inStr then
-			if esc then esc = false
-			elseif c == '\\' then esc = true
-			elseif c == '"' then inStr = false end
-		else
-			if c == '"' then inStr = true
-			elseif c == '[' or c == '{' then depth = depth + 1
-			elseif c == ']' or c == '}' then
-				depth = depth - 1
-				if depth == 0 then return s:sub( i, j ) end
-			end
-		end
-	end
-	return nil
-end
-
--- Pull the `data:[…]` arrays out of every AF_initDataCallback(...) block in the
--- results HTML and JSON-decode them. Returns a list of decoded structures (or a
--- single one), or nil if none were found. Tolerant by design.
-function M.extractData( html )
-	if type( html ) ~= 'string' or html == '' then return nil end
-	local datas, idx = {}, 1
-	while true do
-		local s = html:find( 'AF_initDataCallback', idx, true )
-		if not s then break end
-		local dpos = html:find( 'data:', s, true )
-		local bstart = dpos and html:find( '%[', dpos )
-		if bstart then
-			local slice = balancedSlice( html, bstart )
-			if slice then
-				local decoded = json.decode( slice )
-				if decoded ~= nil then datas[ #datas + 1 ] = decoded end
-			end
-			idx = bstart + 1
-		else
-			idx = s + #'AF_initDataCallback'
-		end
-	end
-	if #datas == 0 then return nil end
-	if #datas == 1 then return datas[ 1 ] end
-	return datas
-end
-
--- parse( decoded ) -> observations[]   (decoded = extractData()'s output)
-function M.parse( decoded )
+-- parse( strings ) -> observations[]   (strings = the helper's match strings)
+function M.parse( strings )
 	local obs = {}
-	if type( decoded ) ~= 'table' then return obs end
-	local MAX = 30 -- bound the candidate count (each becomes a GBIF lookup downstream)
-	for i, text in ipairs( harvest( decoded ) ) do
+	if type( strings ) ~= 'table' then return obs end
+	local MAX = 40 -- bound the candidate count (each may become a GBIF lookup downstream)
+	for i, text in ipairs( harvest( strings ) ) do
 		if i > MAX then break end
 		obs[ #obs + 1 ] = { text = text, kind = 'title', weight = 0.5, source = 'lens:web' }
 	end
@@ -165,88 +88,21 @@ function M.parse( decoded )
 end
 
 --------------------------------------------------------------------------------
--- network (production; uses injected deps.http)
+-- identify: the browser helper does the upload + JS render; we harvest its output
 
--- Mirror a browser "paste into Google Images/Lens" upload: the entry-point (ep),
--- locale, viewport, and a per-request timestamp. opts.st lets callers/tests pin it.
-function M.buildUploadUrl( opts )
-	local st = opts.st or ( tostring( os.time() ) .. '000' )
-	return M.UPLOAD_URL .. '?ep=gsbubb&authuser=0' ..
-		'&hl=' .. urlencode( opts.hl or 'en' ) ..
-		'&gl=' .. urlencode( opts.country or 'us' ) ..
-		'&vpw=800&vph=1000&st=' .. urlencode( st )
-end
-
--- LrHttp.postMultipart content array: the image goes in the `encoded_image` part.
-function M.buildParts( opts )
-	return { {
-		name = 'encoded_image',
-		fileName = opts.fileName or 'image.jpg',
-		filePath = opts.imageFile,
-		contentType = opts.contentType or 'image/jpeg',
-	} }
-end
-
--- Browser-like headers for the upload. The session Cookie is NOT set here — the
--- Lightroom curl transport injects the user's pasted cookie (and manages the
--- cookie jar across the results redirect). opts.cookie lets a caller add one.
-function M.buildHeaders( opts )
-	local h = {
-		[ 'User-Agent' ] = M.USER_AGENT,
-		[ 'Accept' ] = 'text/html,application/xhtml+xml,application/xml;q=0.9,*/*;q=0.8',
-		[ 'Accept-Language' ] = 'en-US,en;q=0.9',
-		[ 'Origin' ] = 'https://www.google.com',
-		[ 'Referer' ] = 'https://www.google.com/',
-		[ 'Sec-Fetch-Dest' ] = 'document',
-		[ 'Sec-Fetch-Mode' ] = 'navigate',
-		[ 'Sec-Fetch-Site' ] = 'same-site',
-		[ 'Sec-Fetch-User' ] = '?1',
-		[ 'Upgrade-Insecure-Requests' ] = '1',
-	}
-	if opts and opts.cookie and opts.cookie ~= '' then h[ 'Cookie' ] = opts.cookie end
-	return h
-end
-
--- Recognise the common "Google won't serve you" pages so we can report a clear
--- reason instead of silently finding nothing.
-local function blockReason( html )
-	if not html or html == '' then return 'no response from Google Lens' end
-	if html:find( 'unusual traffic', 1, true ) or html:find( '/sorry/', 1, true ) then
-		return 'Google is rate-limiting this network ("unusual traffic"). Wait a while and retry, ' ..
-			'or use the Pl@ntNet / Vision backend.'
-	end
-	if html:find( 'Error 403', 1, true ) or html:find( 'consent.google.com', 1, true ) then
-		return 'Google Lens blocked this request (403 / consent wall) — usually a stale or ' ..
-			'missing session cookie, or a shared/datacenter network.'
-	end
-	if html:find( 'not associated with your account', 1, true ) or html:find( 'Re%-upload the image' ) then
-		return 'Google Lens did not associate the upload with your session — your Lens cookie is ' ..
-			'likely expired or incomplete. Re-copy it from your browser into the plugin settings.'
-	end
-	return nil
-end
-
--- fetch( opts, deps ) -> decoded, err   (opts: imageFile, hl, country, cookie)
-function M.fetch( opts, deps )
-	if not opts.imageFile then return nil, 'Google Lens needs an image file (opts.imageFile)' end
-	local body = deps.http.postMultipart(
-		M.buildUploadUrl( opts ), M.buildParts( opts ), M.buildHeaders( opts ) )
-	local reason = blockReason( body )
-	if reason then return nil, reason end
-	local decoded = M.extractData( body )
-	if not decoded then
-		return nil, 'Google Lens returned no parseable results (the page layout may have changed, ' ..
-			'or the session was rejected).'
-	end
-	return decoded
-end
-
+-- identify( opts, deps ) -> observations[], err
+--   opts.imageFile : path to the (downsized) JPEG
+--   deps.lensSearch( imageFile ) -> strings[]|nil, err   (the browser helper)
 function M.identify( opts, deps )
-	local decoded, err = M.fetch( opts, deps )
-	if not decoded then return {}, err end
-	return M.parse( decoded )
+	if type( deps.lensSearch ) ~= 'function' then
+		return {}, 'Google Lens needs the browser helper (deps.lensSearch) — see scripts/lens'
+	end
+	if not opts.imageFile then return {}, 'Google Lens needs an image file (opts.imageFile)' end
+	local strings, err = deps.lensSearch( opts.imageFile )
+	if not strings then return {}, err or 'Google Lens returned nothing' end
+	return M.parse( strings )
 end
 
-M._test = { balancedSlice = balancedSlice, blockReason = blockReason, harvest = harvest }
+M._test = { harvest = harvest }
 
 return M

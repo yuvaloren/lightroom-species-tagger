@@ -10,18 +10,16 @@ Before anything is sent, the photo is rendered to a **downsized JPEG**
 **EXIF/GPS metadata is not included** in what's sent. No backend uses a
 third-party image host — the bytes go straight to the recognition service.
 
-### Google Lens (browser session) backend — the default
-- The downsized JPEG **bytes** are uploaded directly to `lens.google.com`
-  (multipart, the same endpoint the Lens website uses); the results page is then
-  read back and parsed locally.
-- Because Lens has no anonymous API, the plugin **shells out to `curl`** and
-  **self-generates a Google session** — a warm-up request to google.com yields
-  fresh cookies (held in a temporary cookie jar that is deleted), like a fresh
-  incognito window. No API key, no third-party host. Optionally you may paste a
-  browser Cookie value as a fallback; if set, it's stored in Lightroom's plugin
-  preferences on your machine, sent only to Google, and redacted in logs. This is
-  automated access to a consumer Google surface, so Google may rate-limit or block
-  it; nothing is sent anywhere else.
+### Google Lens backend — the default
+- The downsized JPEG **bytes** are uploaded to `lens.google.com` (the same
+  endpoint the Lens website uses). Because Lens has no anonymous API and renders
+  results with JavaScript, the plugin drives your **installed Google Chrome**
+  (headless, via the bundled Node helper) to run the search and read the results.
+- An **anonymous** Google session is generated on the fly (no account, no login,
+  no cookie to paste); cookies live only in a temporary jar that is deleted. No
+  API key and no third-party host are involved. This is automated access to a
+  consumer Google surface, so Google may rate-limit or block it (run it from a
+  normal home connection); nothing is sent anywhere else.
 
 ### Pl@ntNet backend
 - The downsized JPEG **bytes** are uploaded to `my-api.plantnet.org` with your

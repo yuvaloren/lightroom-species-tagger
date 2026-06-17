@@ -11,11 +11,13 @@ All notable changes to this project are documented here. The format is based on
 - Initial release. A Lightroom Classic plugin that identifies plants and animals
   in selected photos with an image-recognition backend and tags them with both
   the **common** and **Latin (scientific)** name.
-- Three interchangeable recognition backends behind a provider seam, all sending
-  image bytes directly (no third-party image host):
-  - **Google Lens (direct)** — the default; **free, no API key**. Talks to Google
-    Lens like a browser and harvests names from the results page. Best-effort:
-    degrades gracefully (a photo goes to *needs review*) if Google blocks/rate-limits.
+- Three interchangeable recognition backends behind a provider seam:
+  - **Google Lens** — the default; **free, no API key**. Lens has no API and
+    renders results with JavaScript, so the plugin drives the user's installed
+    Google Chrome (headless, via the bundled Node helper `scripts/lens`) to run a
+    Lens image search and harvests the match text. Needs Node + Chrome (macOS/Linux);
+    best-effort (a photo goes to *needs review* on any failure). Real-accuracy
+    measurement via `just live-accuracy`; the offline corpus is representative.
   - **Pl@ntNet** — free key, plants only, very reliable.
   - **Google Vision (Web Detection)** — broad coverage; requires a GCP billing account.
 - Keyless taxonomy resolution + normalization via the **GBIF** backbone, with

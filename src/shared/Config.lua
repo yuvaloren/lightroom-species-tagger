@@ -16,13 +16,10 @@ M.DEFAULTS = {
 	plantNetKey = '',
 	plantNetProject = 'all', -- Pl@ntNet flora project ('all' = worldwide)
 
-	-- OPTIONAL Google Lens cookie fallback. Lens normally self-generates a session
-	-- (the curl transport warms up cookies from google.com); paste a browser Cookie
-	-- value here only if your network refuses the self-generated one.
-	lensCookie = '',
-	-- Lens locale (passed to the direct Google Lens upload)
-	lensCountry = 'us',
-	lensHl = 'en',
+	-- Google Lens backend shells out to the bundled Node + Chrome helper. GUI apps
+	-- get a minimal PATH, so set this if `node` isn't auto-found (e.g.
+	-- /opt/homebrew/bin/node). Leave blank to auto-detect.
+	nodePath = '',
 
 	-- Keywording
 	keywordMode = 'both', -- 'flat' | 'hierarchy' | 'both'
@@ -52,8 +49,8 @@ end
 -- Returns ok, message.
 function M.validate( cfg )
 	if cfg.backend == 'lens' then
-		-- Lens self-generates a session (curl warms up cookies from google.com),
-		-- so no credential is required. The optional lensCookie is only a fallback.
+		-- Lens needs no key (it drives the bundled browser helper); nothing to
+		-- validate here. Missing Node/Chrome is reported at run time, per photo.
 		return true
 	elseif cfg.backend == 'vision' then
 		if not cfg.visionApiKey or cfg.visionApiKey == '' then

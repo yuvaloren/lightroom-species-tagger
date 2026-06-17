@@ -19,8 +19,9 @@ luacov.report.out
 # captures) — large and may carry transient session tokens; never committed.
 /spec/fixtures/lens/raw/
 
-# Your browser's "Copy as cURL" for live Lens capture — contains your cookies.
-/spec/fixtures/.lens-session.curl
+# Node deps for the Google Lens browser helper (scripts/lens) — pulled with `npm i`.
+/scripts/lens/node_modules/
+/scripts/lens/package-lock.json
 
 # macOS
 .DS_Store

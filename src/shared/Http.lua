@@ -42,101 +42,52 @@ function M.lrAdapter()
 	}
 end
 
--- A transport that shells out to `curl` via LrTasks.execute, for endpoints that
--- need a real browser SESSION (Google Lens) which LrHttp cannot drive: LrHttp
--- auto-follows the upload→results redirect and drops the session cookie across
--- it, so the upload is never "associated" with the results request. curl keeps a
--- persistent cookie jar (-b/-c) across -L and across calls, so the session holds.
---
--- The session is SELF-GENERATED: the adapter pre-seeds the consent cookie and
--- warms up the jar with a GET to google.com (which returns fresh NID/AEC), exactly
--- like opening Lens in a fresh incognito window — no browser copy-paste needed.
--- opts.cookie is an OPTIONAL override (a Cookie value pasted from a browser) for
--- the rare case where a self-generated session is refused; it augments the jar.
--- macOS/Linux only for now (POSIX sh quoting); Windows curl needs different quoting.
-function M.curlAdapter( opts )
+-- Google Lens has no anonymous API and its results are rendered by JavaScript,
+-- which LrHttp can't execute. So the Lens backend shells out (via LrTasks.execute)
+-- to the bundled Node helper (scripts/lens/lens-search.js), which drives the
+-- user's installed Chrome to render the results and prints JSON { ok, strings }.
+-- This returns a `lensSearch( imageFile ) -> strings[]|nil, err` function for the
+-- provider. macOS/Linux only for now (POSIX quoting); needs Node + Google Chrome.
+--   opts.helperPath : absolute path to lens-search.js (bundled in the .lrplugin)
+--   opts.nodePath   : optional absolute path to `node`
+function M.lensSearchAdapter( opts )
 	local LrTasks = import 'LrTasks'
 	local LrPathUtils = import 'LrPathUtils'
 	local LrFileUtils = import 'LrFileUtils'
+	local json = require 'dkjson'
 	opts = opts or {}
-	local cookie = opts.cookie
-	local curl = '/usr/bin/curl'
-	local seq = 0
+	local helper = opts.helperPath
 
 	local function sh( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
-	local function tmp( tag )
-		seq = seq + 1
-		return LrPathUtils.child( LrPathUtils.getStandardFilePath( 'temp' ),
-			string.format( 'speciestagger-%s-%d-%d.tmp', tag, os.time(), seq ) )
-	end
-	local function readFile( p )
-		local f = io.open( p, 'rb' ); if not f then return nil end
-		local b = f:read( '*a' ); f:close(); return b
-	end
-
-	-- one persistent session jar for this adapter, pre-seeded with a consent cookie
-	-- so Google serves results instead of bouncing to consent.google.com.
-	local jar = tmp( 'jar' )
-	do
-		local f = io.open( jar, 'w' )
-		if f then
-			f:write( '# Netscape HTTP Cookie File\n' )
-			f:write( '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\t' ..
-				( opts.socs or 'CAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg' ) .. '\n' )
-			f:write( '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n' )
-			f:close()
-		end
+	local function exists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
+	-- GUI apps get a minimal PATH, so resolve `node` to a real path.
+	local candidates = { '/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node' }
+	if opts.nodePath and opts.nodePath ~= '' then table.insert( candidates, 1, opts.nodePath ) end
+	local node = 'node'
+	for _, p in ipairs( candidates ) do
+		if exists( p ) then node = p; break end
 	end
 
-	-- run curl with the given argument string; capture stdout from a temp file.
-	-- The persistent jar is read AND written every call, so cookies the upload
-	-- sets are carried into the followed results request.
-	local function exec( argstr )
-		local out = tmp( 'out' )
-		local cmd = curl .. ' -sS --compressed -L --max-time 30 -b ' .. sh( jar ) .. ' -c ' .. sh( jar )
-		if cookie and cookie ~= '' then cmd = cmd .. ' -b ' .. sh( cookie ) end
-		cmd = cmd .. argstr .. ' -o ' .. sh( out ) .. ' 2>/dev/null'
+	return function( imageFile )
+		if not exists( helper ) then return nil, 'Lens helper not found at ' .. tostring( helper ) end
+		local out = LrPathUtils.child( LrPathUtils.getStandardFilePath( 'temp' ),
+			string.format( 'speciestagger-lens-%d.json', os.time() ) )
+		local cmd = node .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. ' > ' .. sh( out ) .. ' 2>/dev/null'
 		LrTasks.execute( cmd )
-		local body = readFile( out )
+		local f = io.open( out, 'rb' )
+		local body = f and f:read( '*a' )
+		if f then f:close() end
 		LrFileUtils.delete( out )
-		return body
+		if not body or body == '' then
+			return nil, 'Google Lens helper produced no output — is Node and Google Chrome installed? ' ..
+				'(see scripts/lens/README), or use the Pl@ntNet / Vision backend.'
+		end
+		local d = json.decode( body )
+		if type( d ) ~= 'table' or not d.ok then
+			return nil, 'Google Lens: ' .. ( d and tostring( d.error ) or 'helper error' )
+		end
+		return d.strings
 	end
-
-	-- warm up the session (fetch fresh NID/AEC into the jar) unless disabled
-	if opts.bootstrap ~= false then
-		exec( ' -H ' .. sh( 'User-Agent: Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) ' ..
-			'AppleWebKit/605.1.15 (KHTML, like Gecko) Version/17.4.1 Safari/605.1.15' ) ..
-			' ' .. sh( 'https://www.google.com/' ) )
-	end
-
-	local function headerArgs( headers )
-		local a = ''
-		for k, v in pairs( headers or {} ) do a = a .. ' -H ' .. sh( k .. ': ' .. v ) end
-		return a
-	end
-
-	return {
-		get = function( url, headers )
-			return exec( headerArgs( headers ) .. ' ' .. sh( url ) )
-		end,
-		post = function( url, body, headers )
-			local bf = tmp( 'post' ); local f = io.open( bf, 'wb' ); f:write( body or '' ); f:close()
-			local r = exec( headerArgs( headers ) .. ' --data-binary @' .. sh( bf ) .. ' ' .. sh( url ) )
-			LrFileUtils.delete( bf ); return r
-		end,
-		postMultipart = function( url, parts, headers )
-			local a = headerArgs( headers )
-			for _, p in ipairs( parts ) do
-				if p.filePath then
-					a = a .. ' -F ' .. sh( p.name .. '=@' .. p.filePath ..
-						( p.contentType and ( ';type=' .. p.contentType ) or '' ) )
-				else
-					a = a .. ' -F ' .. sh( p.name .. '=' .. p.value )
-				end
-			end
-			return exec( a .. ' ' .. sh( url ) )
-		end,
-	}
 end
 
 return M

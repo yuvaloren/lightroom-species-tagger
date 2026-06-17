@@ -60,54 +60,29 @@ describe( 'ProviderGoogleLens', function()
 		assert.is_false( Lens._isCandidate( 'a' ) )
 	end )
 
-	it( 'extractData pulls the data array out of an AF_initDataCallback block', function()
-		-- [==[ … ]==] so the literal "]]" inside the HTML doesn't end the string.
-		local html = [==[<html><script>AF_initDataCallback({key: 'ds:0', hash: '2', data:[null,["A title (Genus species)","https://x/y"]], sideChannel: {}});</script></html>]==]
-		local decoded = Lens.extractData( html )
-		assert.is_truthy( decoded )
-		local t = texts( Lens.parse( decoded ) )
-		assert.is_truthy( t[ 'A title (Genus species)' ] )
-	end )
-
-	it( 'extractData returns nil when there is no callback block', function()
-		assert.is_nil( Lens.extractData( '<html>nothing useful here</html>' ) )
-		assert.is_nil( Lens.extractData( '' ) )
-	end )
-
-	it( 'balancedSlice respects brackets inside strings', function()
-		local s = '[ "a ] b", [1,2] ]TAIL'
-		assert.equal( '[ "a ] b", [1,2] ]', Lens._test.balancedSlice( s, 1 ) )
-	end )
-
-	it( 'reports a clear reason for known block pages', function()
-		assert.matches( 'rate%-limiting', Lens._test.blockReason( 'Sorry... unusual traffic from your network' ) )
-		assert.matches( 'blocked', Lens._test.blockReason( '<title>Error 403 (Forbidden)!!1</title>' ) )
-		assert.is_nil( Lens._test.blockReason( '<html>AF_initDataCallback({data:[]})</html>' ) )
-	end )
-
-	it( 'builds an upload URL and a single encoded_image part', function()
-		local url = Lens.buildUploadUrl { hl = 'en', country = 'us' }
-		assert.matches( 'lens%.google%.com/v3/upload', url )
-		assert.matches( 'hl=en', url )
-		local parts = Lens.buildParts { imageFile = '/tmp/x.jpg' }
-		assert.equal( 'encoded_image', parts[ 1 ].name )
-		assert.equal( '/tmp/x.jpg', parts[ 1 ].filePath )
-	end )
-
-	it( 'identify() uploads, parses the redirected results HTML, returns observations', function()
-		local html = [==[<html><body><script>AF_initDataCallback({key: 'ds:0', hash: '5', ]==] ..
-			[==[data:[null,["Visual matches",[["Day octopus (Octopus cyanea) - Wikipedia","https://en.wikipedia.org/wiki/Octopus_cyanea"]]]]}); </script></body></html>]==]
-		local http = { postMultipart = function() return html end }
-		local obs, err = Lens.identify( { imageFile = '/tmp/x.jpg', hl = 'en', country = 'us' }, { http = http } )
+	it( 'identify() harvests observations from the injected browser helper', function()
+		local helper = function( file )
+			assert.equal( '/tmp/x.jpg', file )
+			return { 'Day octopus (Octopus cyanea) - Wikipedia', 'Lei triggerfish, Sufflamen bursa',
+				'https://en.wikipedia.org/wiki/Octopus_cyanea', 'AI Overview' }
+		end
+		local obs, err = Lens.identify( { imageFile = '/tmp/x.jpg' }, { lensSearch = helper } )
 		assert.is_nil( err )
 		assert.is_truthy( find( obs, 'Day octopus (Octopus cyanea) - Wikipedia' ) )
+		assert.is_truthy( find( obs, 'Lei triggerfish, Sufflamen bursa' ) )
+		assert.is_nil( find( obs, 'https://en.wikipedia.org/wiki/Octopus_cyanea' ) ) -- URL dropped
 	end )
 
-	it( 'identify() reports a clear error when Google blocks the request', function()
-		local http = { postMultipart = function() return '<title>Error 403 (Forbidden)!!1</title>' end }
-		local obs, err = Lens.identify( { imageFile = '/tmp/x.jpg' }, { http = http } )
+	it( 'identify() surfaces the helper error and never crashes', function()
+		local obs, err = Lens.identify( { imageFile = '/tmp/x.jpg' },
+			{ lensSearch = function() return nil, 'Lens helper: blocked' end } )
 		assert.equal( 0, #obs )
 		assert.matches( 'blocked', err )
+	end )
+
+	it( 'identify() errors clearly when no helper is wired in', function()
+		local _, err = Lens.identify( { imageFile = '/tmp/x.jpg' }, {} )
+		assert.matches( 'helper', err )
 	end )
 end )
 

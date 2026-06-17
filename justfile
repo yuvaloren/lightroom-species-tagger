@@ -50,13 +50,10 @@ accuracy: _deps
 record image *FLAGS: _deps
     lua scripts/record-fixture.lua {{image}} {{FLAGS}}
 
-# REFRESH the corpus fixtures from REAL Google Lens, then score them offline.
-# Run on a residential network — Google blocks datacenter/VPN IPs. The captured
-# lens/*.json (+ raw lens/raw/*.html) are then yours to inspect, and `just accuracy`
-# reports the real numbers.
-refresh-fixtures: _deps
-    lua scripts/build-corpus.lua --corpus --live
-    @echo "Now run: just accuracy   (and inspect spec/fixtures/lens/ + spec/fixtures/lens/raw/)"
+# measure REAL Google Lens accuracy via the browser helper (writes nothing).
+# Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.
+live-accuracy *FLAGS: _deps
+    lua scripts/live-accuracy.lua {{FLAGS}}
 
 # compose dist/ bundle (version from VERSION / tag), zip + checksums
 build:

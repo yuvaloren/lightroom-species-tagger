@@ -100,15 +100,15 @@ local function optsFor( backend, cfg, bytes, file )
 		return { imageBytes = bytes, apiKey = cfg.visionApiKey }
 	elseif backend == 'plantnet' then
 		return { imageFile = file, apiKey = cfg.plantNetKey, project = cfg.plantNetProject }
-	else -- 'lens'
-		return { imageFile = file, hl = cfg.lensHl, country = cfg.lensCountry }
+	else -- 'lens' (the browser helper takes just the file path)
+		return { imageFile = file }
 	end
 end
 
 -- Get observations for one photo from the configured provider. Vision sends the
 -- bytes inline; Lens and Pl@ntNet upload them as a multipart file, so those need
 -- a temp JPEG on disk (cleaned up afterwards).
-local function observe( photo, cfg, providerHttp )
+local function observe( photo, cfg, deps )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
 
@@ -120,7 +120,7 @@ local function observe( photo, cfg, providerHttp )
 		if not file then return nil, 'temp file: ' .. tostring( werr ) end
 	end
 
-	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), { http = providerHttp } )
+	local obs, oerr = provider.identify( optsFor( cfg.backend, cfg, bytes, file ), deps )
 	if file then LrFileUtils.delete( file ) end
 	return obs, oerr
 end
@@ -145,14 +145,17 @@ function M.run( _ )
 	end
 
 	local http = Http.lrAdapter()
-	-- Lens drives Google through a self-generating browser session via curl (LrHttp
-	-- can't hold the session across the upload→results redirect); build it ONCE per
-	-- run so the warm-up + cookie jar are shared across photos. Other backends and
+	-- Google Lens has no API and renders results with JS, so its backend shells out
+	-- to the bundled Node + Chrome helper (built once per run). Other backends and
 	-- all GBIF lookups use LrHttp.
-	local providerHttp = http
-	if Providers.get( cfg.backend ).usesCurlTransport then
-		providerHttp = Http.curlAdapter( { cookie = cfg.lensCookie } )
+	local lensSearch
+	if Providers.get( cfg.backend ).usesLensHelper then
+		lensSearch = Http.lensSearchAdapter {
+			helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
+			nodePath = cfg.nodePath,
+		}
 	end
+	local providerDeps = { http = http, lensSearch = lensSearch }
 	local resolveCache = {} -- shared GBIF cache for the whole run
 	local resolveDeps = { http = http, cache = resolveCache }
 	local identCfg = { autoApplyThreshold = cfg.autoApplyThreshold }
@@ -169,7 +172,7 @@ function M.run( _ )
 		progress:setPortionComplete( i - 1, #photos )
 		progress:setCaption( fileName( photo ) )
 
-		local obs, err = observe( photo, cfg, providerHttp )
+		local obs, err = observe( photo, cfg, providerDeps )
 		if not obs then
 			nError = nError + 1
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )

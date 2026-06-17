@@ -303,6 +303,19 @@ local function compose( label )
 		-- the pulled dependency, bundled flat
 		copy_file( dkjson, outdir .. '/dkjson.lua' )
 
+		-- the Google Lens browser helper (Node + Chrome) — bundled so the Lens
+		-- backend can shell out to it at <plugin>/lens/lens-search.js. node_modules
+		-- (puppeteer-core) must be present: run `cd scripts/lens && npm i` first.
+		local lensSrc = ROOT .. '/scripts/lens'
+		if exists( lensSrc .. '/lens-search.js' ) then
+			if not exists( lensSrc .. '/node_modules' ) then
+				log( 'WARNING: scripts/lens/node_modules missing — run `cd scripts/lens && npm i` ' ..
+					'so the Google Lens backend works in the bundle' )
+			end
+			run( string.format( 'cp -R %q %q', lensSrc, outdir .. '/lens' ) )
+			log( 'bundled Google Lens helper -> ' .. outdir .. '/lens' )
+		end
+
 		stamp_info( outdir .. '/Info.lua', major, minor, patch, build )
 		log( string.format( 'built %s  (%d.%d.%d build %d)', outdir, major, minor, patch, build ) )
 	end
