@@ -49,7 +49,44 @@ const puppeteer = require('puppeteer-core');
 const { overlayInjector } = require('./overlay-inject');
 
 const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
-const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
+
+// Match the UA + Client Hints to the REAL installed Chrome. We MUST override the UA
+// because headless Chrome's default UA says "HeadlessChrome/<v>" (a blatant bot tell) —
+// but we override to the ACTUAL major version, not a hardcoded stale one, and we set
+// userAgentMetadata so Sec-CH-UA / navigator.userAgentData agree with the UA string. A
+// string-vs-Client-Hints mismatch (e.g. UA says Chrome/148 while the hints say 149) is
+// itself a self-contradiction no real browser produces, and a signal Google can gate on.
+function chromeVersion() {
+  try {
+    const v = execSync(`"${CHROME}" --version`, { timeout: 10000 }).toString();
+    const m = v.match(/(\d+)\.\d+\.\d+\.\d+/);
+    if (m) return { full: m[0], major: m[1] };
+  } catch (_) {}
+  return { full: '149.0.0.0', major: '149' }; // sane fallback if the version probe fails
+}
+const CHROME_VER = chromeVersion();
+const UA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VER.major}.0.0.0 Safari/537.36`;
+// Client Hints consistent with the UA above. The two real brands carry the true major
+// version; the third "GREASE" brand is deliberate noise servers are required to ignore.
+const UA_METADATA = {
+  brands: [
+    { brand: 'Chromium', version: CHROME_VER.major },
+    { brand: 'Google Chrome', version: CHROME_VER.major },
+    { brand: 'Not?A_Brand', version: '24' },
+  ],
+  fullVersion: CHROME_VER.full,
+  fullVersionList: [
+    { brand: 'Chromium', version: CHROME_VER.full },
+    { brand: 'Google Chrome', version: CHROME_VER.full },
+    { brand: 'Not?A_Brand', version: '24.0.0.0' },
+  ],
+  platform: 'macOS',
+  platformVersion: '15.0.0',
+  architecture: os.arch() === 'arm64' ? 'arm' : 'x86',
+  bitness: '64',
+  model: '',
+  mobile: false,
+};
 const img = process.argv[2];
 // optional photo location, to give Lens geographic context so it favours species
 // that occur there:
@@ -107,7 +144,7 @@ const dbgWrite = (name, content) => {
 
 // Apply the anonymous session to a fresh page: UA, webdriver patch, geolocation, cookies.
 async function prepPage(page, cookies, headed) {
-  await page.setUserAgent(UA);
+  await page.setUserAgent(UA, UA_METADATA);
   if (!headed) await page.setViewport({ width: 1280, height: 1200 });
   await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
   if (hasGeo) {
