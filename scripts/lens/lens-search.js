@@ -46,6 +46,7 @@ const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const puppeteer = require('puppeteer-core');
+const { overlayInjector } = require('./overlay-inject');
 
 const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
 const UA = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/148.0.0.0 Safari/537.36';
@@ -280,33 +281,9 @@ async function installInteractive(page) {
   const cancelClicked = new Promise(r => (resolveCancel = r));
   await page.exposeFunction('__lensParse', () => resolveParse({ via: 'parse' }));
   await page.exposeFunction('__lensCancel', () => resolveCancel({ via: 'cancel' }));
-  await page.evaluateOnNewDocument(() => {
-    const add = () => {
-      if (!document.body || document.getElementById('__lens_overlay')) return;
-      const bar = document.createElement('div');
-      bar.id = '__lens_overlay';
-      bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#202124;color:#fff;font:14px sans-serif;padding:8px 12px;display:flex;gap:8px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.4)';
-      const msg = document.createElement('span');
-      msg.style.cssText = 'flex:1';
-      msg.textContent = 'Species Tagger: complete any Google check, then click “Parse results”.';
-      bar.appendChild(msg);
-      const mk = (label, bg, fn) => {
-        const b = document.createElement('button');
-        b.textContent = label;
-        b.style.cssText = 'padding:6px 12px;border:0;border-radius:4px;cursor:pointer;background:' + bg + ';color:#fff';
-        b.onclick = () => { try { window[fn](); } catch (e) {} };
-        return b;
-      };
-      bar.appendChild(mk('Parse results', '#1a73e8', '__lensParse'));
-      bar.appendChild(mk('Cancel', '#d93025', '__lensCancel'));
-      document.body.appendChild(bar);
-    };
-    if (document.body) add();
-    else {
-      document.addEventListener('DOMContentLoaded', add);
-      document.addEventListener('readystatechange', () => { if (document.readyState !== 'loading') add(); });
-    }
-  });
+  // overlayInjector (./overlay-inject) adds the control bar to the TOP frame only —
+  // see that module + test/overlay-frame.test.js for why subframes must be skipped.
+  await page.evaluateOnNewDocument(overlayInjector);
   return { parseClicked, cancelClicked };
 }
 
