@@ -4,18 +4,18 @@ scripts/lens/test/integration.test.js
 Automated integration test for the interactive challenge-handling flow in
 ../lens-search.js — WITHOUT hitting Google. It serves a local fake "challenge"
 page and a fake "results" page, points the helper at them via LENS_TEST_URL, and
-runs the real helper (headless, LENS_TEST_HEADLESS=1 so the "visible" escalation
-window is headless and CI-safe) across these scenarios:
+runs the real helper (LENS_TEST_HEADLESS=1 so the always-visible window runs
+headless and CI-safe — real runs are never headless) across these scenarios:
 
-  A confident       /results            -> parses in pass 1, no escalation
-  B challenge+auto   /challenge?solve=auto -> detect challenge, escalate, the page
-                                            "solves" itself, auto-detect parses
-  C challenge+cancel /challenge?solve=never + short timeout -> escalate, time out,
-                                            return the cancelled contract
-  D non-interactive  /challenge (no LENS_INTERACTIVE) -> best-effort scrape, returns
-  E parse button     /results-weak?clickParse=1 -> low-signal, escalate, the page
-                                            invokes window.__lensParse() (simulating a
-                                            click of the injected "Parse results" button)
+  A confident       /results            -> auto-detects + parses
+  B challenge+auto   /challenge?solve=auto -> the page "solves" itself, auto-detect
+                                            then parses the real results
+  C challenge+cancel /challenge?solve=never + short timeout -> times out, returns the
+                                            cancelled contract
+  D non-interactive  /challenge (no LENS_INTERACTIVE) -> reports challenged, no scrape
+  E parse button     /results-weak?clickParse=1 -> low-signal, the page invokes
+                                            window.__lensParse() (simulating a click of
+                                            the injected "Parse results" button)
 
 Needs Node + Google Chrome + puppeteer-core (npm i in scripts/lens). Run:
   node scripts/lens/test/integration.test.js     (or: just lens-test)
@@ -103,13 +103,13 @@ const has = (r, re) => !!(r && r.strings && r.strings.some(s => re.test(s)));
       check('weasel (Related searches noise) excluded', !has(r, /Mustela subpalmata/i));
     }
 
-    console.log('B: challenge detected -> escalate -> auto-solve -> auto-detect parses');
+    console.log('B: challenge -> page auto-solves -> auto-detect parses the real results');
     {
-      // pass-1 breaks on the challenge and only ever sees /challenge, so parsing the
-      // /results content here is itself proof the escalation + auto-detect ran.
+      // The helper first lands on /challenge; parsing the /results content here is itself
+      // proof it waited through the challenge (auto-solve) before auto-detecting results.
       const { json: r } = await runHelper(base + '/challenge?solve=auto', { ...I, vars: { LENS_INTERACTIVE: '1', LENS_INTERACTIVE_TIMEOUT: '25000' } }, 40000);
       check('ok=true after solving', r && r.ok === true, JSON.stringify(r));
-      check('parsed the real results (only reachable via escalation)', has(r, /Antennarius commerson/i));
+      check('parsed the real results (only reachable past the challenge)', has(r, /Antennarius commerson/i));
       check('weasel still excluded', !has(r, /Mustela subpalmata/i));
     }
 
@@ -130,7 +130,7 @@ const has = (r, re) => !!(r && r.strings && r.strings.some(s => re.test(s)));
         !has(r, /Antennarius commerson/i) && !!(r && (!r.strings || r.strings.length === 0)));
     }
 
-    console.log('E: low-signal page -> escalate -> "Parse results" button parses');
+    console.log('E: low-signal page -> "Parse results" button parses');
     {
       const { json: r } = await runHelper(base + '/results-weak?clickParse=1', { ...I, vars: { LENS_INTERACTIVE: '1', LENS_INTERACTIVE_TIMEOUT: '20000' } }, 40000);
       check('ok=true via the Parse button', r && r.ok === true, JSON.stringify(r));

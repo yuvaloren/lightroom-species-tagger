@@ -10,7 +10,7 @@ top, so the output is canonical names rather than free-text guesses.
 No money, and no API key for the default **Google Lens** backend — but it needs
 **Node.js + Google Chrome** installed and a one-time `cd scripts/lens && npm i`,
 because Lens has no API and renders results with JavaScript, so the plugin drives
-your real Chrome (headless) to run the search. GBIF (the taxonomy) is free and
+your real Chrome (in a visible window) to run the search. GBIF (the taxonomy) is free and
 keyless. The other backends use their own key: **Pl@ntNet** is a free key
 (500/day, no credit card); **Google Vision** needs a Google Cloud project with
 billing enabled (a card on file; ~1,000 images/month free, then paid).

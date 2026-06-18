@@ -13,13 +13,17 @@ third-party image host — the bytes go straight to the recognition service.
 ### Google Lens backend — the default
 - The downsized JPEG **bytes** are uploaded to `lens.google.com` (the same
   endpoint the Lens website uses). Because Lens has no anonymous API and renders
-  results with JavaScript, the plugin drives your **installed Google Chrome**
-  (headless, via the bundled Node helper) to run the search and read the results.
-- An **anonymous** Google session is generated on the fly (no account, no login,
-  no cookie to paste); cookies live only in a temporary jar that is deleted. No
-  API key and no third-party host are involved. This is automated access to a
-  consumer Google surface, so Google may rate-limit or block it (run it from a
-  normal home connection); nothing is sent anywhere else.
+  results with JavaScript, the plugin drives your **installed Google Chrome** (in a
+  **visible window**, via the bundled Node helper, so Google's real page is shown
+  rather than scraped invisibly) to run the search and read the results.
+- An **anonymous** Google session is used (no account, no login, no cookie to
+  paste). To look like a returning user rather than a fresh bot each time, the
+  helper keeps a **local Chrome profile + cookie jar** under
+  `~/.cache/speciestagger-lens` and reuses it across runs — these cookies stay on
+  your machine and are sent only to Google; delete that folder to reset. No API key
+  and no third-party host are involved. This is automated access to a consumer
+  Google surface, so Google may rate-limit or block it (run it from a normal home
+  connection); nothing is sent anywhere else.
 
 ### Pl@ntNet backend
 - The downsized JPEG **bytes** are uploaded to `my-api.plantnet.org` with your

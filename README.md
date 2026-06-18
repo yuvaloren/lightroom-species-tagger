@@ -49,7 +49,7 @@ reef shot with a fish *and* an octopus gets both.
 
 | Backend | What it is | Cost / setup | Coverage | Notes |
 |---|---|---|---|---|
-| **Google Lens** *(default)* | Drives your installed Chrome (headless) through a Lens image search and harvests the match text | **Free, no key**; needs **Node.js + Google Chrome** (macOS/Linux) | plants + animals | Closest to the Lens app; best-effort (see below) |
+| **Google Lens** *(default)* | Drives your installed Chrome (a **visible** window) through a Lens image search and harvests the match text | **Free, no key**; needs **Node.js + Google Chrome** (macOS/Linux) | plants + animals | Closest to the Lens app; best-effort (see below) |
 | **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; clean scientific + common names |
 | **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, ToS-clean; opt in only if a card is OK |
 
@@ -60,9 +60,11 @@ logic is shared and testable regardless of backend.
 > results are rendered by **JavaScript**, so a plain HTTP client (curl /
 > Lightroom's `LrHttp`) can't read them. The plugin therefore drives a **real
 > browser**: a small Node helper ([scripts/lens](scripts/lens)) uploads the image,
-> transplants the anonymous session into your installed **Google Chrome**
-> (headless), lets it render the JS, and returns the match text — no key, no login,
-> no cookie paste. **One-time setup:** `cd scripts/lens && npm i` (and have Chrome).
+> transplants the anonymous session into your installed **Google Chrome** (in a
+> **visible window**, so Google's real results page — ads and all — is shown rather
+> than scraped invisibly), lets it render the JS, and returns the match text — no
+> key, no login, no cookie paste. **One-time setup:** `cd scripts/lens && npm i`
+> (and have Chrome).
 > It's **best-effort**: run it from a normal home connection (Google blocks
 > datacenter/VPN IPs); on any failure the photo falls through to *needs review* (it
 > never crashes), and you can switch to Pl@ntNet/Vision. macOS/Linux only for now.
@@ -224,7 +226,7 @@ Either way it opens Chrome on the real Lens results page and writes artifacts
 | --- | --- |
 | `uploaded.jpg` | the exact image sent to Lens — confirm it's the right, non-blank photo |
 | `page.png` / `page.html` | the rendered results page — is the right subject in the *Visual matches* grid? |
-| `results-url.txt` | open this in your **own logged-in Chrome** to compare against the headless render |
+| `results-url.txt` | open this in your **own logged-in Chrome** to compare against the helper's render |
 | `strings-sources.json` | every scraped string, the page region it came from, and whether it was excluded as noise |
 | `result.json` | the final `{ overview, strings }` handed to the scorer (was the *AI Overview* empty?) |
 
@@ -237,18 +239,26 @@ is env-gated (`LENS_HEADED` / `LENS_DEBUG`); normal plugin runs are unaffected.
 ### When Google challenges the session
 
 Google sometimes flags the anonymous upload with a CAPTCHA / "unusual traffic" /
-consent wall, so the page has no real results to parse. For a **single-photo**
-selection the plugin handles this interactively: it runs headless first, and only
-if it can't confidently parse the result does it open a **visible Chrome window**
-so you can complete the check. It then auto-detects the real results (or you click
-the injected **"Parse results"** button; **"Cancel"** / a 3-minute timeout aborts
-and the photo is marked *skipped*). Multi-photo batches stay headless and never
-block. Tunable via `LENS_INTERACTIVE` / `LENS_INTERACTIVE_TIMEOUT` in the helper.
+consent wall, so the page has no real results to parse. The helper always works in
+a **visible Chrome window**, so you see the challenge when it appears. For a
+**single-photo** selection it's interactive: a **"Parse results" / "Cancel"** control
+bar appears so you can complete the check, then it auto-detects the real results (or
+you click **"Parse results"**; **"Cancel"** / a 3-minute timeout aborts and the photo
+is marked *skipped*). A **multi-photo batch** is hands-off: on a challenge it stops
+the run (each further request only deepens the block) and tells you how to proceed —
+wait, switch network, run a single photo, or use Pl@ntNet / Vision. Tunable via
+`LENS_INTERACTIVE` / `LENS_INTERACTIVE_TIMEOUT` in the helper.
+
+The biggest factor in *whether* you get challenged is the **network/IP** you run
+from (Google gates the Lens endpoint hard on flagged or shared/CGNAT IPs), not the
+software — a clean residential IP is far less likely to be challenged. The helper
+also throttles batch requests and reuses a warm browser profile to avoid tripping
+the "too many requests too fast" heuristic.
 
 This whole flow has an automated integration test that fakes a local "Google"
-(challenge page + results page) — no network — and drives the real helper headless
-through every branch (confident, challenge→auto-detect, cancel/timeout, the Parse
-button, non-interactive):
+(challenge page + results page) — no network — and drives the real helper (in a
+headless test mode that never touches Google) through every branch (confident,
+challenge→auto-detect, cancel/timeout, the Parse button, non-interactive):
 
 ```
 just lens-test        # = node scripts/lens/test/integration.test.js (needs Chrome)

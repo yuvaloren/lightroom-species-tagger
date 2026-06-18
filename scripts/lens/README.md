@@ -10,7 +10,8 @@ results without a paid scraper API is to run a **real browser**.
 1. uploads the image over `curl` to `lens.google.com/v3/upload` (yields a results
    URL + a fresh **anonymous** session — no login, no cookies to paste),
 2. transplants that session (incl. `HttpOnly` cookies) into your **installed
-   Google Chrome** via `puppeteer-core` (headless),
+   Google Chrome** via `puppeteer-core` (a **visible** window — Google's real page
+   is shown, not scraped invisibly),
 3. navigates Chrome to the results URL so Chrome runs the JS, then scrapes the
    visible match strings,
 4. prints `{ "ok": true, "strings": [ … ] }` on stdout.

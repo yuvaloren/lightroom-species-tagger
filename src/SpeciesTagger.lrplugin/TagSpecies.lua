@@ -195,8 +195,12 @@ function M.run( _ )
 			interactive = interactive,
 			interactiveState = interactiveState,
 		}
+		-- A Chrome window opens to show Google's actual page (the helper is never
+		-- headless). Tell the user so the windows aren't a surprise.
 		if interactive then
-			LrDialogs.showBezel( 'If Google shows a check, a Chrome window will open — solve it there.' )
+			LrDialogs.showBezel( 'A Chrome window will open showing Google’s page — solve any check there if asked.' )
+		else
+			LrDialogs.showBezel( 'A Chrome window will open for each photo to show Google’s page.' )
 		end
 	end
 	local providerDeps = { http = http, lensSearch = lensSearch }

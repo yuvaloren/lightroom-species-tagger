@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /*----------------------------------------------------------------------------
 scripts/lens/lens-search.js
-Google Lens species search via a real (headless) browser — no paid API, no login.
+Google Lens species search via a real, VISIBLE browser — no paid API, no login.
 
 Google Lens has no anonymous API and its results page is rendered by JavaScript,
 so neither curl nor Lightroom's LrHttp can read it. This helper:
@@ -11,6 +11,10 @@ so neither curl nor Lightroom's LrHttp can read it. This helper:
      installed Google Chrome via puppeteer-core,
   3. navigates Chrome to the results URL so Chrome runs the JS and renders the
      matches, and scrapes the visible match text.
+The Chrome window is always VISIBLE (not headless): we show Google's real page —
+ads and all — rather than scraping it invisibly. There is no headless mode for
+real runs; the only headless path is the local integration test (LENS_TEST_HEADLESS),
+which points at a fake server and never touches Google.
 Output (stdout): JSON { ok, count, strings:[…] } — the strings feed the plugin's
 SpeciesParser -> GBIF -> scorer pipeline (which gates precision), so this stays
 recall-oriented and tolerant of noise.
@@ -24,20 +28,21 @@ Warm session: a persistent Chrome profile + cookie jar are kept under
 so the identity ages like a returning user rather than a pristine bot each time.
 Delete that dir to reset. On a Google "unusual traffic" challenge, a non-interactive
 run returns { ok:false, challenged:true } (the caller backs off) rather than
-scraping the challenge page; a single-photo run escalates to the interactive window.
+scraping the challenge page; a single-photo run shows the control bar so the human
+can solve it in the visible window.
 
 Interactive (handle Google "unusual traffic" / CAPTCHA / consent challenges):
-  LENS_INTERACTIVE=1        run headless first; if the result can't be confidently
-                            parsed (a challenge, consent wall, or the enable-JS shell),
-                            open a VISIBLE Chrome window so the user can solve it, then
-                            auto-detect the real results (or a "Parse results" button)
-                            and parse those. A "Cancel" button / timeout aborts. node
-                            STAYS ALIVE until then, so the calling task blocks.
+  LENS_INTERACTIVE=1        in the visible window, show a "Parse results" / "Cancel"
+                            control bar so the user can solve any challenge / consent
+                            wall, then auto-detect the real results (or the "Parse
+                            results" button) and parse those. A "Cancel" button /
+                            timeout aborts. node STAYS ALIVE until then, so the calling
+                            task blocks. (Single-photo runs only; a batch is hands-off.)
   LENS_INTERACTIVE_TIMEOUT  ms to wait for the human before giving up (default 180000).
 
 Troubleshooting (opt-in via env; the plugin pipes stderr to /dev/null and reads
 only the single stdout JSON line, so these never affect a normal run):
-  LENS_HEADED=1     show a real Chrome window (implies LENS_DEBUG=1)
+  LENS_HEADED=1     deprecated alias for LENS_DEBUG=1 (the window is always visible now)
   LENS_DEBUG=1      write artifacts to LENS_DEBUG_DIR (default $TMPDIR/lens-debug):
                     results-url.txt, uploaded.jpg, page.png, page.html,
                     strings-sources.json (each scraped string + the page region it
@@ -135,11 +140,12 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
   'skip to main content', 'accessibility help', 'sign in', 'feedback', 'send feedback', 'translate',
   'footer links', 'privacy', 'terms', 'help', 'update location', 'all', 'ai mode', 'images', 'more']);
 
-// --- opt-in debug / headed / interactive modes (see header). All non-result output
-// goes to stderr + files; stdout stays the single JSON result line.
-const HEADED = process.env.LENS_HEADED === '1';
-const DEBUG = HEADED || process.env.LENS_DEBUG === '1';
-const KEEPOPEN = HEADED && process.env.LENS_KEEP_OPEN === '1';
+// --- opt-in debug / interactive modes (see header). All non-result output goes to stderr
+// + files; stdout stays the single JSON result line. Rendering is ALWAYS in a visible
+// Chrome window now — we don't run a hidden/headless scrape of Google's page. The only
+// headless path left is the local test harness (LENS_TEST_HEADLESS), which never hits Google.
+const DEBUG = process.env.LENS_DEBUG === '1' || process.env.LENS_HEADED === '1'; // LENS_HEADED kept as a debug alias
+const KEEPOPEN = process.env.LENS_KEEP_OPEN === '1'; // debug: leave the window open afterwards (detached)
 const INTERACTIVE = process.env.LENS_INTERACTIVE === '1';
 const INTERACTIVE_TIMEOUT = parseInt(process.env.LENS_INTERACTIVE_TIMEOUT || '180000', 10) || 180000;
 // Test hooks (integration test only): point at a local fake server instead of
@@ -433,32 +439,37 @@ async function emit(page, browser, escProc) {
   if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.copyFileSync(img, path.join(DBGDIR, 'uploaded.jpg')); } catch (e) { dbg('uploaded.jpg copy failed:', e.message); } }
 
   let browser = null, escProc = null;
-  // Debug/keep-open opens a visible window from the start; otherwise headless first.
-  const startVisible = HEADED || KEEPOPEN;
+  // ALWAYS render in a VISIBLE Chrome window so Google's actual page — ads and all — is
+  // shown while we work; we do not run a hidden headless scrape. KEEPOPEN uses the detached
+  // launcher so the window survives for inspection (debug); otherwise puppeteer manages a
+  // normal visible window. LENS_TEST_HEADLESS is the sole headless path (local test server).
   try {
-    if (startVisible) {
+    if (KEEPOPEN) {
       const d = await openDetachedChrome(); browser = d.browser; escProc = d.proc;
-      dbg('opened a visible Chrome window —', d.endpoint);
+      dbg('opened a detached visible Chrome window —', d.endpoint);
     } else {
       browser = await puppeteer.launch({
         executablePath: CHROME,
-        headless: 'new',
+        headless: TEST_HEADLESS ? 'new' : false,   // visible for real use; headless ONLY for the local test harness
         slowMo: SLOWMO,
         dumpio: DEBUG,
         // Persistent profile (warm session): aged NID/history across runs, not a pristine
         // bot profile each time. Batch photos run sequentially so there's no dir contention.
         userDataDir: path.join(CACHE_DIR, 'chrome-profile'),
-        args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US'],
+        defaultViewport: null,                       // use the real (maximized) window size
+        args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--lang=en-US']
+          .concat(TEST_HEADLESS ? [] : ['--start-maximized']),
       });
     }
+    const headed = !TEST_HEADLESS;
     let pages = await browser.pages();
     let page = pages.length ? pages[0] : await browser.newPage();
-    await prepPage(page, cookies, startVisible);
+    await prepPage(page, cookies, headed);
 
     if (!INTERACTIVE) {
-      // Non-interactive (batch / fast path): load, then bail CLEARLY on a challenge so the
-      // caller can back off — never scrape the /sorry or consent page as if it were results
-      // (that returned the captcha boilerplate as fake species candidates).
+      // Non-interactive (batch): load, then bail CLEARLY on a challenge so the caller can
+      // back off — never scrape the /sorry or consent page as if it were results (that
+      // returned the captcha boilerplate as fake species candidates).
       await loadResults(page, url);
       const a = await assessConfidence(page);
       if (a.reason === 'challenged' || a.reason === 'consent') {
@@ -472,22 +483,8 @@ async function emit(page, browser, escProc) {
       return;
     }
 
-    if (!startVisible) {
-      // Headless first: parse straight away if confident, else escalate to a window.
-      await loadResults(page, url);
-      const a = await assessConfidence(page);
-      dbg('pass-1 confidence:', a.reason);
-      if (a.confident) { await emit(page, browser, escProc); return; }
-      dbg('not confident (' + a.reason + ') — escalating to a visible window');
-      if (DEBUG) { try { fs.writeFileSync(path.join(DBGDIR, 'page-challenge.html'), await page.content()); } catch (_) {} }
-      try { await browser.close(); } catch (_) {}
-      const d = await openDetachedChrome(); browser = d.browser; escProc = d.proc;
-      page = (await browser.pages())[0] || await browser.newPage();
-      await prepPage(page, cookies, true);
-    }
-
-    // Visible window + interactive: show the control bar, navigate, wait for the human.
-    // waitForResult's poll does the readiness-waiting, so just a light navigation here.
+    // Interactive (single photo): we're already visible, so show the control bar, navigate,
+    // and wait for the human to solve any Google check (or auto-detect real results).
     const { parseClicked, cancelClicked } = await installInteractive(page);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
     const outcome = await waitForResult(page, parseClicked, cancelClicked);
