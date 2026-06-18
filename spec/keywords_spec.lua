@@ -15,17 +15,17 @@ local function attachSet( plan )
 end
 
 describe( 'Keywords.hierarchyLevels', function()
-	it( 'orders kingdom..species and de-dups', function()
+	it( 'orders kingdom..family then the species leaf (genus omitted, de-dups)', function()
 		local lv = Keywords.hierarchyLevels( OCTOPUS )
 		assert.same( { 'Animalia', 'Mollusca', 'Cephalopoda', 'Octopoda',
-			'Octopodidae', 'Octopus', 'Octopus cyanea' }, lv )
+			'Octopodidae', 'Octopus cyanea' }, lv )
 	end )
-	it( 'skips missing ranks (e.g. absent class)', function()
+	it( 'skips missing ranks (e.g. absent class) and the redundant genus', function()
 		local t = { scientificName = 'Sufflamen bursa', kingdom = 'Animalia',
 			phylum = 'Chordata', order = 'Tetraodontiformes', family = 'Balistidae',
 			genus = 'Sufflamen' }
 		assert.same( { 'Animalia', 'Chordata', 'Tetraodontiformes', 'Balistidae',
-			'Sufflamen', 'Sufflamen bursa' }, Keywords.hierarchyLevels( t ) )
+			'Sufflamen bursa' }, Keywords.hierarchyLevels( t ) )
 	end )
 end )
 

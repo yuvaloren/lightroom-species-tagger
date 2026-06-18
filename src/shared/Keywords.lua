@@ -6,8 +6,9 @@ LrCatalog:createKeyword / photo:addKeyword.
 
 Modes (chosen in plugin settings):
   'flat'      : two top-level keywords — the common name and the Latin name.
-  'hierarchy' : the full GBIF chain Kingdom > … > Genus > Species, attaching the
-                species leaf (Latin name), with the common name as a synonym.
+  'hierarchy' : the GBIF chain Kingdom > … > Family > Species (genus omitted — it's
+                already the first word of the binomial), attaching the species leaf
+                (Latin name), with the common name as a synonym.
   'both'      : the hierarchy AND the two flat keywords (this project's default).
 
 A plan node is { path = { 'Animalia', …, 'Octopus cyanea' }, synonyms = {…},
@@ -19,7 +20,10 @@ created but not directly attached (Lightroom shows them as the keyword's path).
 
 local M = {}
 
-M.RANK_ORDER = { 'kingdom', 'phylum', 'class', 'order', 'family', 'genus', 'species' }
+-- Genus is intentionally omitted: it is redundant with the binomial species name
+-- (the "Fistularia" node over "Fistularia commersonii" adds nothing), so the species
+-- leaf attaches directly under the family.
+M.RANK_ORDER = { 'kingdom', 'phylum', 'class', 'order', 'family', 'species' }
 
 -- Ordered classification names present on the taxon (species slot = Latin name).
 function M.hierarchyLevels( taxon )
