@@ -250,8 +250,11 @@ async function scrapeRaw(page) {
 async function openDetachedChrome() {
   const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-chrome-'));
   const visArgs = TEST_HEADLESS ? ['--headless=new'] : ['--start-maximized']; // headless for CI tests
+  // NB: no --disable-blink-features=AutomationControlled here — recent Chrome shows
+  // an "unsupported command-line flag" warning bar for it on a visible window. We get
+  // the same effect (hidden navigator.webdriver) from prepPage's evaluateOnNewDocument.
   const proc = spawn(CHROME, ['--remote-debugging-port=0', '--user-data-dir=' + udd,
-    '--no-first-run', '--no-default-browser-check', '--disable-blink-features=AutomationControlled',
+    '--no-first-run', '--no-default-browser-check',
     '--lang=en-US', ...visArgs, 'about:blank'], { detached: true, stdio: 'ignore' });
   proc.unref();
   const portFile = path.join(udd, 'DevToolsActivePort');
