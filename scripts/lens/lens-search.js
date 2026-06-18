@@ -19,6 +19,13 @@ Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core).
 Override Chrome with LENS_CHROME=/path/to/chrome. Run from a residential network.
 Usage: node lens-search.js <image.jpg> [lat lng | "City, State, Country"]
 
+Warm session: a persistent Chrome profile + cookie jar are kept under
+~/.cache/speciestagger-lens (override with LENS_CACHE_DIR) and reused across runs
+so the identity ages like a returning user rather than a pristine bot each time.
+Delete that dir to reset. On a Google "unusual traffic" challenge, a non-interactive
+run returns { ok:false, challenged:true } (the caller backs off) rather than
+scraping the challenge page; a single-photo run escalates to the interactive window.
+
 Interactive (handle Google "unusual traffic" / CAPTCHA / consent challenges):
   LENS_INTERACTIVE=1        run headless first; if the result can't be confidently
                             parsed (a challenge, consent wall, or the enable-JS shell),
