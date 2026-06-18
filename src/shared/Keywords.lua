@@ -5,11 +5,12 @@ and testable — it builds the plan; TagSpecies.lua (LR side) walks it with
 LrCatalog:createKeyword / photo:addKeyword.
 
 Modes (chosen in plugin settings):
-  'flat'      : two top-level keywords — the common name and the Latin name.
+  'flat'      : two top-level keywords — the common name and the Latin name (the
+                default: no taxonomy hierarchy, just the two names).
   'hierarchy' : the GBIF chain Kingdom > … > Family > Species (genus omitted — it's
                 already the first word of the binomial), attaching the species leaf
                 (Latin name), with the common name as a synonym.
-  'both'      : the hierarchy AND the two flat keywords (this project's default).
+  'both'      : the hierarchy AND the two flat keywords.
 
 A plan node is { path = { 'Animalia', …, 'Octopus cyanea' }, synonyms = {…},
 attach = <bool> }. The LR side ensures each element of `path` exists
@@ -44,13 +45,13 @@ function M.hierarchyLevels( taxon )
 end
 
 -- plan( taxon, opts ) -> { nodes = {...}, attachNames = {...}, mode = <string> }
---   opts.mode          : 'flat' | 'hierarchy' | 'both'   (default 'both')
+--   opts.mode          : 'flat' | 'hierarchy' | 'both'   (default 'flat')
 --   opts.rootKeyword   : optional parent to nest the hierarchy under (e.g. 'Wildlife')
 --   opts.flatRoot      : optional parent for the flat keywords (default top-level)
 --   opts.commonAsSynonym : attach the common name as a synonym of the Latin leaf (default true)
 function M.plan( taxon, opts )
 	opts = opts or {}
-	local mode = opts.mode or 'both'
+	local mode = opts.mode or 'flat'
 	local commonAsSynonym = opts.commonAsSynonym ~= false
 	local sci = taxon.scientificName
 	local common = taxon.commonName

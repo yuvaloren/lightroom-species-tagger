@@ -22,7 +22,7 @@ M.DEFAULTS = {
 	nodePath = '',
 
 	-- Keywording
-	keywordMode = 'both', -- 'flat' | 'hierarchy' | 'both'
+	keywordMode = 'flat', -- 'flat' | 'hierarchy' | 'both'  (flat = just the common + Latin name)
 	rootKeyword = '',     -- optional parent for the hierarchy (e.g. 'Wildlife')
 	flatRoot = '',        -- optional parent for the flat keywords
 	includeOnExport = true,

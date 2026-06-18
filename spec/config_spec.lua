@@ -5,7 +5,7 @@ describe( 'Config.load', function()
 	it( 'returns defaults when prefs is nil', function()
 		local c = Config.load( nil )
 		assert.equal( 'lens', c.backend )
-		assert.equal( 'both', c.keywordMode )
+		assert.equal( 'flat', c.keywordMode )
 		assert.equal( 'all', c.plantNetProject )
 		assert.is_true( c.autoApplyThreshold > 0 )
 	end )
@@ -13,7 +13,7 @@ describe( 'Config.load', function()
 		local c = Config.load { backend = 'vision', autoApplyThreshold = 0.8 }
 		assert.equal( 'vision', c.backend )
 		assert.equal( 0.8, c.autoApplyThreshold )
-		assert.equal( 'both', c.keywordMode ) -- untouched default
+		assert.equal( 'flat', c.keywordMode ) -- untouched default
 	end )
 	it( 'has dropped the SerpApi / image-host settings', function()
 		local c = Config.load( nil )
