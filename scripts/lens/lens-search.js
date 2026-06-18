@@ -87,6 +87,12 @@ const UA_METADATA = {
   model: '',
   mobile: false,
 };
+// Warm-session cache: a PERSISTENT Chrome profile + cookie jar reused across photos and
+// runs. A fresh anonymous profile + brand-new cookie jar on every single request is
+// itself a bot signal (zero history, identical cold start every time); an aged, reused
+// identity looks like a returning user. Override the location with LENS_CACHE_DIR.
+const CACHE_DIR = process.env.LENS_CACHE_DIR || path.join(os.homedir(), '.cache', 'speciestagger-lens');
+try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (_) {}
 const img = process.argv[2];
 // optional photo location, to give Lens geographic context so it favours species
 // that occur there:
@@ -394,23 +400,26 @@ async function emit(page, browser, escProc) {
     url = TEST_URL;
     dbg('TEST mode: pointing at', url);
   } else {
-    const jar = `/tmp/lens-jar-${process.pid}.txt`;
-    fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
-      '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
-      '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
+    // Persistent jar (warm session): reuse + age the cookies across runs. Seed the
+    // consent cookies only when first creating it; thereafter let curl read/refresh it.
+    const jar = path.join(CACHE_DIR, 'cookies.txt');
+    if (!fs.existsSync(jar)) {
+      fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
+        '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
+        '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
+    }
     try {
       execSync(`curl -sS --compressed -A ${q(UA)} -b ${q(jar)} -c ${q(jar)} -o /dev/null https://www.google.com/`, { timeout: 30000 });
       url = execSync(`curl -sS --compressed -L -A ${q(UA)} -b ${q(jar)} -c ${q(jar)} ` +
         `-H 'Origin: https://www.google.com' -H 'Referer: https://www.google.com/' ` +
         `-F ${q('encoded_image=@' + img + ';type=image/jpeg')} -o /dev/null -w '%{url_effective}' ` +
         `'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=${Date.now()}'`, { timeout: 60000 }).toString().trim();
-    } catch (e) { try { fs.unlinkSync(jar); } catch (_) {} fail('upload failed: ' + e.message); }
-    if (!/[?&]vsrid=/.test(url)) { try { fs.unlinkSync(jar); } catch (_) {} fail('upload rejected (no results URL)'); }
+    } catch (e) { fail('upload failed: ' + e.message); }              // keep the jar (it's persistent/warm)
+    if (!/[?&]vsrid=/.test(url)) fail('upload rejected (no results URL)');
     cookies = fs.readFileSync(jar, 'utf8').split('\n')
       .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
       .map(l => { const p = l.split('\t'); return p.length >= 7 ? { name: p[5], value: p[6], domain: p[0], path: p[2], secure: p[3] === 'TRUE' } : null; })
       .filter(Boolean);
-    try { fs.unlinkSync(jar); } catch (_) {}
   }
   dbg('results URL:', url);
   dbgWrite('results-url.txt', url);
@@ -429,6 +438,9 @@ async function emit(page, browser, escProc) {
         headless: 'new',
         slowMo: SLOWMO,
         dumpio: DEBUG,
+        // Persistent profile (warm session): aged NID/history across runs, not a pristine
+        // bot profile each time. Batch photos run sequentially so there's no dir contention.
+        userDataDir: path.join(CACHE_DIR, 'chrome-profile'),
         args: ['--no-sandbox', '--disable-blink-features=AutomationControlled', '--lang=en-US'],
       });
     }
@@ -437,8 +449,18 @@ async function emit(page, browser, escProc) {
     await prepPage(page, cookies, startVisible);
 
     if (!INTERACTIVE) {
-      // Non-interactive (batch / fast path): load + scrape whatever's there (unchanged).
+      // Non-interactive (batch / fast path): load, then bail CLEARLY on a challenge so the
+      // caller can back off — never scrape the /sorry or consent page as if it were results
+      // (that returned the captcha boilerplate as fake species candidates).
       await loadResults(page, url);
+      const a = await assessConfidence(page);
+      if (a.reason === 'challenged' || a.reason === 'consent') {
+        dbg('non-interactive challenge:', a.reason, '— signalling the caller to back off');
+        if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.writeFileSync(path.join(DBGDIR, 'page-challenge.html'), await page.content()); } catch (_) {} }
+        teardown(browser, escProc);
+        out({ ok: false, challenged: true, reason: a.reason, strings: [] });
+        return;
+      }
       await emit(page, browser, escProc);
       return;
     }

@@ -210,6 +210,8 @@ function M.run( _ )
 
 	local nApplied, nReview, nError, nSkipped = 0, 0, 0, 0
 	local lines = {}
+	local challenged = false       -- set if Google rate-limited us; aborts + explains
+	math.randomseed( os.time() )   -- for the inter-request throttle jitter below
 
 	for i, photo in ipairs( photos ) do
 		if progress:isCanceled() then break end
@@ -220,6 +222,13 @@ function M.run( _ )
 		if err == '__lens_cancelled__' then
 			nSkipped = nSkipped + 1
 			lines[ #lines + 1 ] = '⊘ ' .. fileName( photo ) .. ' — skipped (Google check cancelled)'
+		elseif err == '__lens_challenged__' then
+			-- Google rate-limited this IP ("unusual traffic"). Stop the batch — every
+			-- further request only deepens the block — and explain how to proceed below.
+			challenged = true
+			nSkipped = nSkipped + 1
+			lines[ #lines + 1 ] = '⊘ ' .. fileName( photo ) .. ' — Google challenge (IP rate-limited); stopped here'
+			break
 		elseif not obs then
 			nError = nError + 1
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )
@@ -254,6 +263,14 @@ function M.run( _ )
 				end
 			end, { timeout = 30 } )
 		end
+
+		-- Throttle Lens requests: Google challenges bursts ("sending requests very
+		-- quickly") from one IP. Space batch photos out with jitter so a run doesn't trip
+		-- the rate heuristic. Lens-only (other backends are plain API calls); skipped after
+		-- the last photo and when the user has cancelled.
+		if lensSearch and i < #photos and not progress:isCanceled() then
+			LrTasks.sleep( 6 + math.random() * 9 )  -- ~6–15s jittered
+		end
 	end
 
 	progress:done()
@@ -262,7 +279,15 @@ function M.run( _ )
 		'Tagged %d, flagged %d for review, skipped %d, %d error%s (of %d).\n\n%s',
 		nApplied, nReview, nSkipped, nError, nError == 1 and '' or 's', #photos,
 		table.concat( lines, '\n' ) )
-	LrDialogs.message( 'Species Tagger', summary, ( nError > 0 and nApplied == 0 ) and 'warning' or 'info' )
+	if challenged then
+		summary = summary .. '\n\n⚠ Google rate-limited this network (the “unusual traffic” ' ..
+			'check). The block clears on its own after a while. To continue now: wait and ' ..
+			'retry later, switch to a different network (e.g. a phone hotspot), run a single ' ..
+			'photo (a Chrome window opens so you can solve the check by hand), or switch to ' ..
+			'the Pl@ntNet / Vision backend in the plug-in settings.'
+	end
+	LrDialogs.message( 'Species Tagger', summary,
+		( challenged or ( nError > 0 and nApplied == 0 ) ) and 'warning' or 'info' )
 end
 
 return M

@@ -114,6 +114,12 @@ function M.lensSearchAdapter( opts )
 			if interactiveState then interactiveState.allow = false end
 			return nil, '__lens_cancelled__'
 		end
+		-- Google challenged this request ("unusual traffic"). A distinct sentinel (not a
+		-- generic error) so the caller can back off the rest of the batch instead of
+		-- hammering the endpoint (each further request deepens the IP's reputation hit).
+		if type( d ) == 'table' and d.challenged then
+			return nil, '__lens_challenged__'
+		end
 		if type( d ) ~= 'table' or not d.ok then
 			return nil, 'Google Lens: ' .. ( d and tostring( d.error ) or 'helper error' )
 		end

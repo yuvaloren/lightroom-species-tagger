@@ -120,11 +120,14 @@ const has = (r, re) => !!(r && r.strings && r.strings.some(s => re.test(s)));
       check('cancelled=true (not a hard error)', !!(r && r.cancelled));
     }
 
-    console.log('D: non-interactive challenge -> best-effort, returns without hanging');
+    console.log('D: non-interactive challenge -> reports challenged, does NOT scrape it as results');
     {
       const { json: r } = await runHelper(base + '/challenge?solve=never', { __img: img, vars: {} }, 30000);
       check('returns a JSON result', !!r, 'no JSON on stdout');
-      check('does not surface the frogfish (it was a challenge page)', !has(r, /Antennarius commerson/i));
+      check('ok=false (a challenge is not a success)', !!(r && r.ok === false), JSON.stringify(r));
+      check('challenged=true (distinct backoff signal for the caller)', !!(r && r.challenged));
+      check('does not surface the frogfish or challenge boilerplate as results',
+        !has(r, /Antennarius commerson/i) && !!(r && (!r.strings || r.strings.length === 0)));
     }
 
     console.log('E: low-signal page -> escalate -> "Parse results" button parses');
