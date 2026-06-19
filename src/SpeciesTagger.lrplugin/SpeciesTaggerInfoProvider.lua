@@ -23,7 +23,15 @@ function M.sectionsForTopOfDialog( f, _ )
 	local okVer, version = pcall( require, 'Version' )
 	version = ( okVer and type( version ) == 'string' ) and version or 'dev'
 
-	local bind = LrView.bind
+	-- Bind every control directly to the plugin's stored prefs (LrPrefs). Without an
+	-- explicit bind_to_object, LrView binds to a transient per-dialog table that is NOT
+	-- seeded and NOT persisted — which is why the dropdowns opened empty, the checkbox
+	-- showed the indeterminate "–" state, and the keep-open setting never took effect.
+	local function bind( spec )
+		if type( spec ) == 'string' then spec = { key = spec } end
+		spec.bind_to_object = spec.bind_to_object or prefs
+		return LrView.bind( spec )
+	end
 	local labelW = LrView.share 'st_label_width'
 
 	local backendItems = {}
