@@ -47,6 +47,12 @@ function M.sectionsForTopOfDialog( f, _ )
 				wrap = true, width = 540, height_in_lines = 3,
 			},
 			f:row {
+				f:checkbox {
+					title = 'Keep the browser open (a new tab per photo) for follow-ups, e.g. asking Google’s AI',
+					value = bind 'lensKeepOpen',
+				},
+			},
+			f:row {
 				f:static_text { title = 'node path:', width = labelW, alignment = 'right' },
 				f:edit_field { value = bind 'nodePath', width_in_chars = 40 },
 				f:static_text { title = '(Lens; blank = auto)' },

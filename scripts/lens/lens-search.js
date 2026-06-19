@@ -31,6 +31,12 @@ run returns { ok:false, challenged:true } (the caller backs off) rather than
 scraping the challenge page; a single-photo run shows the control bar so the human
 can solve it in the visible window.
 
+Keep open: with LENS_KEEP_TABS=1 the helper shares ONE persistent visible window
+across photos (a normal window WITH a tab strip) — a new tab per image, never closed —
+so the result pages stay for follow-ups (e.g. asking Google's AI more). It connects to
+an already-open window or launches a detached one on a fixed debug port (LENS_TABS_PORT,
+default 9333; separate profile ~/.cache/speciestagger-lens/chrome-profile-open).
+
 Interactive (handle Google "unusual traffic" / CAPTCHA / consent challenges):
   LENS_INTERACTIVE=1        in the visible window, show a "Parse results" / "Cancel"
                             control bar so the user can solve any challenge / consent
@@ -146,6 +152,9 @@ const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related
 // headless path left is the local test harness (LENS_TEST_HEADLESS), which never hits Google.
 const DEBUG = process.env.LENS_DEBUG === '1' || process.env.LENS_HEADED === '1'; // LENS_HEADED kept as a debug alias
 const KEEPOPEN = process.env.LENS_KEEP_OPEN === '1'; // debug: leave the window open afterwards (detached)
+// User feature ("keep the browser open"): one persistent, visible window shared across
+// photos, a NEW TAB per image, never closed — so result pages stay for follow-ups.
+const KEEP_TABS = process.env.LENS_KEEP_TABS === '1';
 const INTERACTIVE = process.env.LENS_INTERACTIVE === '1';
 const INTERACTIVE_TIMEOUT = parseInt(process.env.LENS_INTERACTIVE_TIMEOUT || '180000', 10) || 180000;
 // Test hooks (integration test only): point at a local fake server instead of
@@ -302,6 +311,27 @@ async function scrapeRaw(page) {
   });
 }
 
+// "Keep browser open" mode: ONE persistent, visible Chrome (a normal window WITH a tab
+// strip — tabs are the point here) shared across photos via a fixed remote-debug port.
+// Each photo opens a new tab in it and never closes it, so the user keeps the result
+// pages for follow-ups (e.g. asking Google's AI more). Connect to an already-open one,
+// else launch a detached one that survives this (per-photo) process exiting. Because it's
+// a connect()ed browser, puppeteer never kills it — process exit just drops the socket.
+const TABS_PORT = parseInt(process.env.LENS_TABS_PORT || '9333', 10) || 9333;
+const TABS_PROFILE = path.join(CACHE_DIR, 'chrome-profile-open');
+async function connectTabbed() {
+  const tryConnect = () => puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null });
+  try { return await tryConnect(); } catch (_) {}   // an existing keep-open window?
+  try { fs.mkdirSync(TABS_PROFILE, { recursive: true }); } catch (_) {}
+  const visArgs = TEST_HEADLESS ? ['--headless=new'] : []; // headless only for the integration test
+  const proc = spawn(CHROME, ['--remote-debugging-port=' + TABS_PORT, '--user-data-dir=' + TABS_PROFILE,
+    '--no-first-run', '--no-default-browser-check', '--lang=en-US', '--window-size=1280,960',
+    ...visArgs, 'about:blank'], { detached: true, stdio: 'ignore' });
+  proc.unref();
+  for (let i = 0; i < 100; i++) { await sleep(100); try { return await tryConnect(); } catch (_) {} }
+  throw new Error('could not start the keep-open Chrome window (port ' + TABS_PORT + ')');
+}
+
 // Launch a visible Chrome we DON'T own (detached + connect). puppeteer only kills
 // browsers it *launched*, never connect()ed ones, so we control teardown explicitly.
 async function openDetachedChrome() {
@@ -438,15 +468,22 @@ async function emit(page, browser, escProc) {
   dbgWrite('results-url.txt', url);
   if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.copyFileSync(img, path.join(DBGDIR, 'uploaded.jpg')); } catch (e) { dbg('uploaded.jpg copy failed:', e.message); } }
 
-  let browser = null, escProc = null;
+  let browser = null, escProc = null, page = null;
   // ALWAYS render in a VISIBLE Chrome window so Google's actual page — ads and all — is
-  // shown while we work; we do not run a hidden headless scrape. KEEPOPEN uses the detached
-  // launcher so the window survives for inspection (debug); otherwise puppeteer manages a
-  // normal visible window. LENS_TEST_HEADLESS is the sole headless path (local test server).
+  // shown while we work; we do not run a hidden headless scrape. LENS_TEST_HEADLESS is the
+  // sole headless path (local test server). Three window modes:
+  //   KEEP_TABS : one persistent window, a NEW TAB per image, never closed (user feature).
+  //   KEEPOPEN  : a detached window kept open for inspection (debug).
+  //   default   : a small chrome-less --app popup that closes after each image.
   try {
-    if (KEEPOPEN) {
+    if (KEEP_TABS) {
+      browser = await connectTabbed();             // connected (not launched): survives our exit
+      const open = await browser.pages();
+      page = open.find(p => p.url() === 'about:blank') || await browser.newPage(); // a tab for this image
+    } else if (KEEPOPEN) {
       const d = await openDetachedChrome(); browser = d.browser; escProc = d.proc;
       dbg('opened a detached visible Chrome window —', d.endpoint);
+      page = (await browser.pages())[0] || await browser.newPage();
     } else {
       browser = await puppeteer.launch({
         executablePath: CHROME,
@@ -463,10 +500,9 @@ async function emit(page, browser, escProc) {
         args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--lang=en-US']
           .concat(TEST_HEADLESS ? [] : ['--app=about:blank', '--window-size=1280,960']),
       });
+      page = (await browser.pages())[0] || await browser.newPage();
     }
     const headed = !TEST_HEADLESS;
-    let pages = await browser.pages();
-    let page = pages.length ? pages[0] : await browser.newPage();
     await prepPage(page, cookies, headed);
 
     if (!INTERACTIVE) {

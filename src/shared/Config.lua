@@ -21,6 +21,10 @@ M.DEFAULTS = {
 	-- /opt/homebrew/bin/node). Leave blank to auto-detect.
 	nodePath = '',
 
+	-- Lens: keep the Chrome window open after each photo (a new tab per photo) so you
+	-- can do follow-ups (e.g. ask Google's AI more). Off = a popup that closes per photo.
+	lensKeepOpen = false,
+
 	-- Keywording
 	keywordMode = 'flat', -- 'flat' | 'hierarchy' | 'both'  (flat = just the common + Latin name)
 	rootKeyword = '',     -- optional parent for the hierarchy (e.g. 'Wildlife')

@@ -65,6 +65,8 @@ function M.lensSearchAdapter( opts )
 	-- batch stops prompting once the user cancels.
 	local interactive = opts.interactive
 	local interactiveState = opts.interactiveState
+	-- Keep the browser open across the batch (one window, a new tab per photo).
+	local keepOpen = opts.keepOpen
 
 	local function sh( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
 	local function exists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
@@ -96,6 +98,7 @@ function M.lensSearchAdapter( opts )
 		if interactive and ( not interactiveState or interactiveState.allow ) then
 			envp = envp .. 'LENS_INTERACTIVE=1 '
 		end
+		if keepOpen then envp = envp .. 'LENS_KEEP_TABS=1 ' end
 		local cmd = envp .. sh( node ) .. ' ' .. sh( helper ) .. ' ' .. sh( imageFile ) .. loc ..
 			' > ' .. sh( out ) .. ' ' .. errRedir
 		LrTasks.execute( cmd )

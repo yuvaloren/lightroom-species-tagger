@@ -194,6 +194,7 @@ function M.run( _ )
 			nodePath = cfg.nodePath,
 			interactive = interactive,
 			interactiveState = interactiveState,
+			keepOpen = cfg.lensKeepOpen,
 		}
 		-- A Chrome window opens to show Google's actual page (the helper is never
 		-- headless). Tell the user so the windows aren't a surprise.
