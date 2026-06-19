@@ -18,6 +18,11 @@ function M.sectionsForTopOfDialog( f, _ )
 		if prefs[ k ] == nil then prefs[ k ] = v end
 	end
 
+	-- Full version label (stamped into Version.lua at build time). Lightroom's own
+	-- version field is numeric (shows e.g. 0.1.0.0), so we surface the real label here.
+	local okVer, version = pcall( require, 'Version' )
+	version = ( okVer and type( version ) == 'string' ) and version or 'dev'
+
 	local bind = LrView.bind
 	local labelW = LrView.share 'st_label_width'
 
@@ -34,9 +39,10 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:popup_menu { value = bind 'backend', items = backendItems },
 			},
 			f:static_text {
-				title = 'Google Lens needs no key — the plugin drives your installed Google Chrome ' ..
-					'(headless) to run a Lens image search. It needs Node.js + Google Chrome on this ' ..
-					'machine (macOS/Linux). Pl@ntNet (plants) and Google Vision use their own key below. ' ..
+				title = 'Google Lens needs no key — the plugin opens your installed Google Chrome ' ..
+					'(in a visible window, so you see Google’s real page) to run a Lens image search. ' ..
+					'It needs Node.js + Google Chrome on this machine (macOS/Linux). Pl@ntNet (plants ' ..
+					'only) and Google Vision are alternative backends that use their own key below. ' ..
 					'See docs/PRIVACY.md for what leaves your machine.',
 				wrap = true, width = 540, height_in_lines = 3,
 			},
@@ -74,7 +80,7 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:static_text { title = '(optional parent, e.g. Wildlife)' },
 			},
 			f:row {
-				f:static_text { title = 'Auto-apply at:', width = labelW, alignment = 'right' },
+				f:static_text { title = 'Auto-tag confidence:', width = labelW, alignment = 'right' },
 				f:slider { value = bind 'autoApplyThreshold', min = 0.30, max = 0.95, width = 200 },
 				f:static_text {
 					width_in_chars = 5,
@@ -82,12 +88,21 @@ function M.sectionsForTopOfDialog( f, _ )
 						transform = function( v ) return string.format( '%.2f', v or 0 ) end },
 				},
 			},
+			f:static_text {
+				title = 'How confident the identification must be (0–1) before keywords are applied ' ..
+					'automatically. Below this, the photo is only flagged with the needs-review tag ' ..
+					'instead of tagged. Higher = fewer wrong tags, but more photos left for review.',
+				wrap = true, width = 540, height_in_lines = 2,
+			},
 			f:row {
 				f:static_text { title = 'Needs-review tag:', width = labelW, alignment = 'right' },
 				f:edit_field { value = bind 'needsReviewKeyword', width_in_chars = 28 },
 			},
 			f:row {
 				f:checkbox { title = 'Include applied keywords on export', value = bind 'includeOnExport' },
+			},
+			f:row {
+				f:static_text { title = 'Version: ' .. version },
 			},
 		},
 	}

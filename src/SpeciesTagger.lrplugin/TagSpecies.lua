@@ -269,11 +269,11 @@ function M.run( _ )
 		end
 
 		-- Throttle Lens requests: Google challenges bursts ("sending requests very
-		-- quickly") from one IP. Space batch photos out with jitter so a run doesn't trip
-		-- the rate heuristic. Lens-only (other backends are plain API calls); skipped after
-		-- the last photo and when the user has cancelled.
+		-- quickly") from one IP, so space batch photos out with a little jitter rather
+		-- than firing back-to-back. Lens-only (other backends are plain API calls);
+		-- skipped after the last photo and when the user has cancelled.
 		if lensSearch and i < #photos and not progress:isCanceled() then
-			LrTasks.sleep( 6 + math.random() * 9 )  -- ~6–15s jittered
+			LrTasks.sleep( 3 + math.random() * 4 )  -- ~3–7s jittered
 		end
 	end
 

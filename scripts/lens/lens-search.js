@@ -461,7 +461,7 @@ async function emit(page, browser, escProc) {
         // the page. We open it on about:blank so prepPage can set the UA/cookies/geo before
         // we navigate to the results URL (the app window stays chromeless across that nav).
         args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--lang=en-US']
-          .concat(TEST_HEADLESS ? [] : ['--app=about:blank', '--window-size=1000,820']),
+          .concat(TEST_HEADLESS ? [] : ['--app=about:blank', '--window-size=1280,960']),
       });
     }
     const headed = !TEST_HEADLESS;

@@ -259,11 +259,15 @@ end
 --------------------------------------------------------------------------------
 -- compose + stamp + package
 
-local function stamp_info( info_path, major, minor, revision, build )
+local function stamp_info( info_path, major, minor, revision, build, label )
 	local src = read_file( info_path )
+	-- `display` carries the full label (incl. any -pre suffix). Lightroom's numeric
+	-- version field can only show major.minor.revision.build (so "0.1.0-dev" -> "0.1.0.0");
+	-- newer Lightroom honours `display` for the shown string, and older versions ignore
+	-- the extra key harmlessly. The settings panel also shows the label via Version.lua.
 	local replacement = string.format(
-		'VERSION = { major = %d, minor = %d, revision = %d, build = %d }',
-		major, minor, revision, build )
+		'VERSION = { major = %d, minor = %d, revision = %d, build = %d, display = %q }',
+		major, minor, revision, build, label )
 	local out, n = src:gsub( 'VERSION%s*=%s*{[^}]*}', replacement )
 	if n == 0 then
 		die( 'no VERSION table found to stamp in ' .. info_path )
@@ -316,7 +320,10 @@ local function compose( label )
 			log( 'bundled Google Lens helper -> ' .. outdir .. '/lens' )
 		end
 
-		stamp_info( outdir .. '/Info.lua', major, minor, patch, build )
+		stamp_info( outdir .. '/Info.lua', major, minor, patch, build, label )
+		-- Stamp the full label as a module the settings panel can show verbatim (the
+		-- Plug-in Manager's own version field is numeric-only). Overwrites the src copy.
+		write_file( outdir .. '/Version.lua', string.format( 'return %q\n', label ) )
 		log( string.format( 'built %s  (%d.%d.%d build %d)', outdir, major, minor, patch, build ) )
 	end
 end
