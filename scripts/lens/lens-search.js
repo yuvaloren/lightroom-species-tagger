@@ -456,9 +456,12 @@ async function emit(page, browser, escProc) {
         // Persistent profile (warm session): aged NID/history across runs, not a pristine
         // bot profile each time. Batch photos run sequentially so there's no dir contention.
         userDataDir: path.join(CACHE_DIR, 'chrome-profile'),
-        defaultViewport: null,                       // use the real (maximized) window size
+        defaultViewport: null,                       // viewport follows the real window size
+        // App-style popup window: small, and with no tabs / toolbar / bookmark bar — just
+        // the page. We open it on about:blank so prepPage can set the UA/cookies/geo before
+        // we navigate to the results URL (the app window stays chromeless across that nav).
         args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--lang=en-US']
-          .concat(TEST_HEADLESS ? [] : ['--start-maximized']),
+          .concat(TEST_HEADLESS ? [] : ['--app=about:blank', '--window-size=1000,820']),
       });
     }
     const headed = !TEST_HEADLESS;
