@@ -30,7 +30,7 @@ All notable changes to this project are documented here. The format is based on
   multisearch text refinement, and location is also used as browser geolocation.
 - **Re-parse to correct results:** with "Keep the browser open" on, each photo's tab
   is stamped with the photo it belongs to; refine the wrong ones, then run **Plug-in
-  Extras ▸ Re-parse Open Lens Tabs & Re-tag** once to sweep every open Lens tab (no
+  Extras ▸ Re-tag from open Lens tabs** once to sweep every open Lens tab (no
   new upload) and re-tag each tab's own photo in a single batch.
 - **First-run welcome** listing every setting and where to find it.
 - **Cross-platform:** macOS, Linux, and Windows (Chrome discovery, process handling,

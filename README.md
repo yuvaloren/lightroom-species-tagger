@@ -79,7 +79,7 @@ Each run can add text to the image search so Lens weighs picture **and** words:
 **Correcting results (re-parse).** Turn on **Keep the browser open** in settings.
 Now each photo's results stay in its own tab. Fix as many as you like — refine the
 search in any tab(s) (Lens lets you add words, crop, or pick a different match) —
-then in Lightroom run **Plug-in Extras ▸ Re-parse Open Lens Tabs & Re-tag** once. It
+then in Lightroom run **Plug-in Extras ▸ Re-tag from open Lens tabs** once. It
 sweeps **every** open Lens tab, re-tags each tab's own photo from your corrected
 search (no new upload, no marking, no per-photo selection), and reports what changed.
 

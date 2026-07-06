@@ -43,9 +43,9 @@ species that actually occur there.
 ### Can I correct wrong tags without re-shooting?
 Yes — with **Keep the browser open** on, each photo's Lens results stay in its own
 tab. Refine the search in any tab(s) that were wrong (add words, crop, or pick a
-different match), then in Lightroom run **Plug-in Extras ▸ Re-parse Open Lens Tabs &
-Re-tag** once. It sweeps **every** open Lens tab and re-tags each tab's own photo
-from your corrected search — no new upload, no marking, no per-photo selection.
+different match), then in Lightroom run **Plug-in Extras ▸ Re-tag from open Lens
+tabs** once. It sweeps **every** open Lens tab and re-tags each tab's own photo from
+your corrected search — no new upload, no marking, no per-photo selection.
 
 ### Is the confidence score based on anything?
 It's honest but not magic: it's a bounded **evidence score** from 0 to 1, **not

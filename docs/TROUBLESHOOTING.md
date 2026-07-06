@@ -39,7 +39,7 @@ Correct it in place instead of re-shooting:
    its own tab.
 2. Refine the search in any tab(s) that were wrong (add words, crop, or pick a
    different match).
-3. In Lightroom, run **Plug-in Extras ▸ Re-parse Open Lens Tabs & Re-tag**. It
+3. In Lightroom, run **Plug-in Extras ▸ Re-tag from open Lens tabs**. It
    sweeps every open Lens tab and re-tags each tab's own photo — no new upload, no
    marking, no per-photo selection.
 
