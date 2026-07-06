@@ -12,6 +12,10 @@ hitting it repeatedly to tune parsing/scoring is wasteful and noisy. Instead:
   (replay)  : default. Replay the CACHED Lens output through the real parser ->
               GBIF -> scorer and score it. No Google, deterministic, instant — so
               you can edit the parser/scorer and re-run to see the effect.
+  --sweep   : CALIBRATION. Replay the cache and print precision / recall / false+ at
+              every auto-apply threshold, using the plugin's exact confidence gate
+              (Identify.confidentAt). This is how you ground the threshold in real
+              data rather than guessing — see docs/SCORING.md.
 
 GBIF responses are cached too (deterministic; fetched live on a cache miss, e.g.
 when a parser change surfaces a new candidate), so replay needs no network at all
@@ -21,10 +25,11 @@ family ONLY — common names are ignored (a species has many acceptable ones).
 Usage:
   lua scripts/live-accuracy.lua --groundtruth fixtures.groundtruth.monterey --capture
   lua scripts/live-accuracy.lua --groundtruth fixtures.groundtruth.monterey   # replay+tune
-Options: --groundtruth <module>  --images <dir>  --cache <dir>  --limit N  --throttle S
+  lua scripts/live-accuracy.lua --groundtruth fixtures.groundtruth.monterey --sweep
+Options: --groundtruth <module>  --images <dir>  --cache <dir>  --limit N  --throttle S  --sweep
 ------------------------------------------------------------------------------]]
 
-package.path = table.concat( { 'src/shared/?.lua', 'build/.deps/?.lua', 'spec/?.lua', package.path }, ';' )
+package.path = table.concat( { 'src/shared/?.lua', 'output/deps/?.lua', 'spec/?.lua', package.path }, ';' )
 
 local json = require 'dkjson'
 local Identify = require 'Identify'
@@ -33,12 +38,13 @@ local Lens = require 'ProviderGoogleLens'
 local harness = require 'support.harness'
 
 local opts = { images = 'spec/fixtures/images', cache = nil, limit = nil, throttle = 0,
-	capture = false, groundtruth = 'fixtures.groundtruth.yuvalsaw' }
+	capture = false, sweep = false, groundtruth = 'fixtures.groundtruth.monterey' }
 do
 	local i = 1
 	while arg[ i ] do
 		local a = arg[ i ]
 		if a == '--capture' then opts.capture = true
+		elseif a == '--sweep' then opts.sweep = true
 		elseif a == '--images' then i = i + 1; opts.images = arg[ i ]
 		elseif a == '--cache' then i = i + 1; opts.cache = arg[ i ]
 		elseif a == '--groundtruth' then i = i + 1; opts.groundtruth = arg[ i ]
@@ -121,6 +127,7 @@ print( string.format( '%-22s %-7s %-7s %-7s %-7s %-7s %s', 'image', 'recall', 't
 print( ('-'):rep( 84 ) )
 
 local totFound, totExp, totFP, tested, top1, missing = 0, 0, 0, 0, 0, 0
+local collected = {} -- { result, expected } per tested image, for the --sweep calibration
 for _, image in ipairs( order ) do
 	if opts.limit and tested >= opts.limit then break end
 	local path = opts.images .. '/' .. image
@@ -139,6 +146,7 @@ for _, image in ipairs( order ) do
 			local result = Identify.run( Lens.parse( strings ), {
 				resolve = function( c ) return Taxonomy.resolve( c, { http = gbifHttp, cache = {} } ) end,
 			} )
+			collected[ #collected + 1 ] = { result = result, expected = expected }
 			local m = harness.metrics( { expected = expected }, result )
 			totFound = totFound + m.found; totExp = totExp + m.total; totFP = totFP + m.falsePositives
 			if m.top1 then top1 = top1 + 1 end
@@ -155,4 +163,44 @@ print( ( 'TESTED %d   recall %d/%d (%.0f%%)   top-1 %d/%d   false+ %d%s' ):forma
 	missing > 0 and ( '   missing-image ' .. missing ) or '' ) )
 if not opts.capture and tested == 0 then
 	print( '\nNothing cached yet — run with --capture once (residential network) to fetch + save Lens output.' )
+end
+
+--------------------------------------------------------------------------------
+-- --sweep: threshold calibration. For each candidate auto-apply threshold, report
+-- precision / recall / false-positives over the tested images, using the plugin's
+-- exact confidence gate (Identify.confidentAt). Precision = correct auto-tags /
+-- all auto-tags; recall = expected species recovered / all expected. Pick the
+-- threshold that gives the precision you want — that's what to set in the plugin.
+if opts.sweep and tested > 0 then
+	local function normSci( s ) return ( tostring( s or '' ):gsub( '%s+', ' ' ):gsub( '^%s+', '' ):gsub( '%s+$', '' ):lower() ) end
+	print( '\n' .. ('='):rep( 60 ) )
+	print( 'THRESHOLD CALIBRATION (Identify.confidentAt over the cache)' )
+	print( 'precision = correct auto-tags / all auto-tags; recall = expected found / all expected' )
+	print( ('-'):rep( 60 ) )
+	print( string.format( '%-11s %-9s %-9s %-7s %-7s %s', 'threshold', 'precision', 'recall', 'tags', 'correct', 'false+' ) )
+	print( ('-'):rep( 60 ) )
+	local t = 0.30
+	while t <= 0.951 do
+		local tags, correct, expTotal, expFound = 0, 0, 0, 0
+		for _, c in ipairs( collected ) do
+			local exp = {}
+			for _, e in ipairs( c.expected ) do exp[ normSci( e.scientific ) ] = true; expTotal = expTotal + 1 end
+			local found = {}
+			for _, a in ipairs( c.result.results ) do
+				if Identify.confidentAt( a, t, nil, c.result.hasAuthoritative ) then
+					tags = tags + 1
+					local key = normSci( a.taxon.scientificName )
+					if exp[ key ] then correct = correct + 1; found[ key ] = true end
+				end
+			end
+			for k in pairs( found ) do if exp[ k ] then expFound = expFound + 1 end end
+		end
+		local precision = tags > 0 and ( correct / tags ) or 1.0
+		local recall = expTotal > 0 and ( expFound / expTotal ) or 0
+		print( string.format( '%-11.2f %-9.2f %-9.2f %-7d %-7d %d',
+			t, precision, recall, tags, correct, tags - correct ) )
+		t = t + 0.05
+	end
+	print( ('-'):rep( 60 ) )
+	print( 'Set "Auto-tag confidence" in the plugin to the threshold whose precision/recall you prefer.' )
 end

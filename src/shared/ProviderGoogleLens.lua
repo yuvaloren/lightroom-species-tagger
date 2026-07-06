@@ -112,13 +112,18 @@ end
 --   opts.lat/opts.lng : optional capture coordinates (helps Lens favour local species)
 --   opts.place        : optional place name (city/state/country) used when there are
 --                       no coordinates — the helper geocodes it
---   deps.lensSearch( imageFile, lat, lng, place ) -> strings[]|nil, err  (browser helper)
+--   opts.query        : optional text refinement (user keywords + place name) added
+--                       to the visual search (Lens "multisearch"); best-effort
+--   opts.photoPath/opts.photoName : identity stamped on the keep-open tab so a later
+--                       re-parse can re-tag this exact photo
+--   deps.lensSearch( imageFile, lat, lng, place, query, photoPath, photoName ) -> strings[]|nil, err
 function M.identify( opts, deps )
 	if type( deps.lensSearch ) ~= 'function' then
 		return {}, 'Google Lens needs the browser helper (deps.lensSearch) — see scripts/lens'
 	end
 	if not opts.imageFile then return {}, 'Google Lens needs an image file (opts.imageFile)' end
-	local strings, err = deps.lensSearch( opts.imageFile, opts.lat, opts.lng, opts.place )
+	local strings, err = deps.lensSearch( opts.imageFile, opts.lat, opts.lng, opts.place, opts.query,
+		opts.photoPath, opts.photoName )
 	if not strings then return {}, err or 'Google Lens returned nothing' end
 	return M.parse( strings )
 end

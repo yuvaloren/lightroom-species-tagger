@@ -19,6 +19,15 @@ Scoring (transparent + tunable via cfg; see M.DEFAULTS):
                  common candidate resolved to the same taxon)
   confidence   = finalSupport / (finalSupport + squashK)   -- squashed to (0,1)
 
+WHAT THE CONFIDENCE NUMBER IS (and is not): it is a *bounded evidence score*, not a
+calibrated probability. It rises monotonically with how much mutually-agreeing
+evidence supports a taxon, and the squash keeps it in (0,1) so a single threshold
+works — but a "0.62" does NOT mean "62% of such tags are correct". The weights above
+are hand-chosen, not fitted to a labelled dataset. So treat the threshold as an
+operating point (higher = fewer wrong tags, more photos left for review), and ground
+it in YOUR data with the calibration sweep: `just live-accuracy -- --sweep` reports
+precision/recall at each threshold over your real captures. See docs/SCORING.md.
+
 Multi-subject images work naturally: every taxon clearing the threshold is
 returned in `confident`, so a frame with two animals can tag both.
 ------------------------------------------------------------------------------]]
@@ -59,6 +68,20 @@ function M.confidence( finalSupport, squashK )
 	squashK = squashK or M.DEFAULTS.squashK
 	if finalSupport <= 0 then return 0 end
 	return finalSupport / ( finalSupport + squashK )
+end
+
+-- Would this aggregated taxon auto-apply at `threshold`? The single gate used both by
+-- run() and by the calibration sweep (scripts/live-accuracy.lua --sweep), so a swept
+-- threshold means exactly what the plugin would do. A confident taxon needs a confirmed
+-- binomial OR strong common-name agreement, enough support, and — when the provider gave
+-- an authoritative answer (Lens's AI Overview) — to be one it named.
+function M.confidentAt( a, threshold, cfg, hasAuthoritative )
+	cfg = cfg or M.DEFAULTS
+	local trusted = ( not hasAuthoritative ) or a.authoritative
+	return a.confidence >= threshold
+		and a.finalSupport >= ( cfg.minSupport or M.DEFAULTS.minSupport )
+		and ( a.sci or a.hits >= ( cfg.commonOnlyHits or M.DEFAULTS.commonOnlyHits ) )
+		and trusted
 end
 
 -- run( observations, deps, cfg ) -> result
@@ -128,14 +151,7 @@ function M.run( observations, deps, cfg )
 
 	local confident = {}
 	for _, a in ipairs( results ) do
-		-- A confident taxon needs a confirmed binomial OR strong agreement: a
-		-- common-name-only hit must recur (>= commonOnlyHits) across the evidence,
-		-- which rejects the incidental lookalikes the web titles surface.
-		local trusted = ( not hasAuthoritative ) or a.authoritative
-		a.confident = a.confidence >= cfg.autoApplyThreshold
-			and a.finalSupport >= cfg.minSupport
-			and ( a.sci or a.hits >= cfg.commonOnlyHits )
-			and trusted
+		a.confident = M.confidentAt( a, cfg.autoApplyThreshold, cfg, hasAuthoritative )
 		if a.confident then confident[ #confident + 1 ] = a end
 	end
 
@@ -143,6 +159,7 @@ function M.run( observations, deps, cfg )
 		candidates = cands,
 		results = results,
 		confident = confident,
+		hasAuthoritative = hasAuthoritative,
 		top = results[ 1 ],
 		decision = ( #confident > 0 ) and 'apply' or 'review',
 	}

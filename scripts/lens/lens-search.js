@@ -23,6 +23,11 @@ Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core).
 Override Chrome with LENS_CHROME=/path/to/chrome. Run from a residential network.
 Usage: node lens-search.js <image.jpg> [lat lng | "City, State, Country"]
 
+Text refinement (optional): set LENS_QUERY to extra words (the user's keywords +
+the photo's place name) and the helper appends them to the visual search as a
+"multisearch" text refinement, so Lens weighs the image + words together. Best-
+effort — if Google ignores it, the plain image results come back unchanged.
+
 Warm session: a persistent Chrome profile + cookie jar are kept under
 ~/.cache/speciestagger-lens (override with LENS_CACHE_DIR) and reused across runs
 so the identity ages like a returning user rather than a pristine bot each time.
@@ -59,14 +64,42 @@ only the single stdout JSON line, so these never affect a normal run):
   LENS_SLOWMO=<ms>  slow Puppeteer actions so you can watch
 The ./debug-lens.sh wrapper sets all of these for you.
 ----------------------------------------------------------------------------*/
-const { execSync, spawn } = require('child_process');
+const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const puppeteer = require('puppeteer-core');
 const { overlayInjector } = require('./overlay-inject');
 
-const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome';
+const IS_WIN = process.platform === 'win32';
+// The system "discard" sink for curl -o, per platform.
+const NULL_DEVICE = IS_WIN ? 'NUL' : '/dev/null';
+
+// Locate the installed Google Chrome across macOS / Windows / Linux. Override with
+// LENS_CHROME=/path/to/chrome (or chrome.exe). Returns the first path that exists.
+function findChrome() {
+  if (process.env.LENS_CHROME) return process.env.LENS_CHROME;
+  const pf = process.env['ProgramFiles'] || 'C:\\Program Files';
+  const pfx86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
+  const local = process.env['LOCALAPPDATA'] || path.join(os.homedir(), 'AppData', 'Local');
+  const candidates = IS_WIN ? [
+    path.join(pf, 'Google\\Chrome\\Application\\chrome.exe'),
+    path.join(pfx86, 'Google\\Chrome\\Application\\chrome.exe'),
+    path.join(local, 'Google\\Chrome\\Application\\chrome.exe'),
+    path.join(pf, 'Google\\Chrome Beta\\Application\\chrome.exe'),
+    path.join(pf, 'Chromium\\Application\\chrome.exe'),
+  ] : process.platform === 'darwin' ? [
+    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
+    '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
+    '/Applications/Chromium.app/Contents/MacOS/Chromium',
+  ] : [
+    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/opt/google/chrome/chrome',
+    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium',
+  ];
+  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
+  return candidates[0]; // best guess; puppeteer will report a clear error if absent
+}
+const CHROME = findChrome();
 
 // Match the UA + Client Hints to the REAL installed Chrome. We MUST override the UA
 // because headless Chrome's default UA says "HeadlessChrome/<v>" (a blatant bot tell) —
@@ -76,14 +109,19 @@ const CHROME = process.env.LENS_CHROME || '/Applications/Google Chrome.app/Conte
 // itself a self-contradiction no real browser produces, and a signal Google can gate on.
 function chromeVersion() {
   try {
-    const v = execSync(`"${CHROME}" --version`, { timeout: 10000 }).toString();
+    const v = execFileSync(CHROME, ['--version'], { timeout: 10000 }).toString();
     const m = v.match(/(\d+)\.\d+\.\d+\.\d+/);
     if (m) return { full: m[0], major: m[1] };
   } catch (_) {}
   return { full: '149.0.0.0', major: '149' }; // sane fallback if the version probe fails
 }
 const CHROME_VER = chromeVersion();
-const UA = `Mozilla/5.0 (Macintosh; Intel Mac OS X 10_15_7) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VER.major}.0.0.0 Safari/537.36`;
+// UA + Client-Hints platform, chosen to match the OS we're actually running on (a Mac
+// UA on Windows would itself be an inconsistency a server can flag).
+const PLATFORM = IS_WIN ? { ua: 'Windows NT 10.0; Win64; x64', ch: 'Windows', chVer: '10.0.0' }
+  : process.platform === 'darwin' ? { ua: 'Macintosh; Intel Mac OS X 10_15_7', ch: 'macOS', chVer: '15.0.0' }
+  : { ua: 'X11; Linux x86_64', ch: 'Linux', chVer: '' };
+const UA = `Mozilla/5.0 (${PLATFORM.ua}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VER.major}.0.0.0 Safari/537.36`;
 // Client Hints consistent with the UA above. The two real brands carry the true major
 // version; the third "GREASE" brand is deliberate noise servers are required to ignore.
 const UA_METADATA = {
@@ -98,8 +136,8 @@ const UA_METADATA = {
     { brand: 'Google Chrome', version: CHROME_VER.full },
     { brand: 'Not?A_Brand', version: '24.0.0.0' },
   ],
-  platform: 'macOS',
-  platformVersion: '15.0.0',
+  platform: PLATFORM.ch,
+  platformVersion: PLATFORM.chVer,
   architecture: os.arch() === 'arm64' ? 'arm' : 'x86',
   bitness: '64',
   model: '',
@@ -121,6 +159,17 @@ let lng = parseFloat(process.argv[4]);
 let hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
 const place = (!hasGeo && process.argv[3] && process.argv[3].trim() !== '') ? process.argv[3].trim() : null;
 
+// Optional TEXT to add to the visual search (Google Lens "multisearch" / "Add to
+// your search"): the user's extra keywords + the photo's place name. Best-effort —
+// appended to the results URL as a text refinement so Lens weighs image + words
+// together; if Google ignores it, the plain image results are returned unchanged.
+const QUERY = (process.env.LENS_QUERY || '').trim();
+
+// In "keep browser open" mode we stamp each tab with the photo it belongs to
+// (window.__stPhotoPath), so --reparse can re-tag every open Lens tab's own photo.
+const PHOTO_PATH = process.env.LENS_PHOTO_PATH || '';
+const PHOTO_NAME = process.env.LENS_PHOTO_NAME || '';
+
 // Geocode a place name to coordinates via OpenStreetMap Nominatim (free, no key).
 async function geocode(name) {
   try {
@@ -133,11 +182,18 @@ async function geocode(name) {
   return null;
 }
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const q = s => "'" + String(s).replace(/'/g, "'\\''") + "'";
+// Run curl with an argv array (no shell), so it works identically on Windows and
+// POSIX and needs no manual quoting. Returns stdout as a string.
+const curl = args => execFileSync('curl', args, { timeout: 60000 }).toString();
 const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
 const fail = m => out({ ok: false, error: m, strings: [] });
 const cancel = () => out({ ok: false, cancelled: true, strings: [] });
-if (!img || !fs.existsSync(img)) fail('image not found: ' + img);
+// Re-parse mode: don't upload anything — connect to the already-open "keep browser
+// open" window and re-scrape EVERY tab still on Google Lens (each stamped with the
+// photo it's for), so corrected searches re-tag their photos in one batch pass
+// (issue: "re-parse any open windows still on google lens").
+const REPARSE = process.argv.includes('--reparse');
+if (!REPARSE && (!img || !fs.existsSync(img))) fail('image not found: ' + img);
 
 // Google UI chrome / boilerplate to drop (the GBIF step would reject it anyway,
 // but trimming keeps the candidate set small).
@@ -332,6 +388,77 @@ async function connectTabbed() {
   throw new Error('could not start the keep-open Chrome window (port ' + TABS_PORT + ')');
 }
 
+// Injected into each keep-open tab. Self-contained (runs in the page via
+// evaluateOnNewDocument on every document), taking the photo's path + name as args:
+//   1) stamps the tab with the photo it belongs to (window.__stPhotoPath/Name), so
+//      --reparse can re-tag every open Lens tab's own photo;
+//   2) records when you last worked in THIS tab (window.__stLastActive), used to
+//      order the re-parse output most-recent-first;
+//   3) shows a small hint bar reminding you how to re-parse from Lightroom.
+function keepOpenBarInjector(photoPath, photoName) {
+  if (window.top !== window.self) return;               // top frame only
+  try { window.__stPhotoPath = photoPath || ''; window.__stPhotoName = photoName || ''; } catch (_) {}
+  const bump = () => { try { window.__stLastActive = Date.now(); } catch (_) {} };
+  bump();                                               // loading this tab counts as activity
+  ['mousedown', 'keydown', 'focus', 'visibilitychange'].forEach(e => {
+    try { document.addEventListener(e, () => { if (document.visibilityState === 'visible') bump(); }, true); } catch (_) {}
+  });
+  const add = () => {
+    if (!document.body || document.getElementById('__lens_keepbar')) return;
+    const bar = document.createElement('div');
+    bar.id = '__lens_keepbar';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#202124;color:#fff;font:13px sans-serif;padding:6px 12px;box-shadow:0 -2px 8px rgba(0,0,0,.4)';
+    bar.textContent = 'Species Tagger — refine this search if the tag was wrong (in any tab), then switch to ' +
+      'Lightroom and run “Re-parse Lens Tabs & Re-tag”. It re-reads every open Lens tab and re-tags each photo.';
+    document.body.appendChild(bar);
+  };
+  if (document.body) add();
+  else document.addEventListener('DOMContentLoaded', add);
+}
+
+// Re-parse: connect to the keep-open window and scrape EVERY tab still on Google
+// Lens results, returning one entry per tab tagged with the photo it belongs to
+// (window.__stPhotoPath). This lets Lightroom re-tag each photo from its own refined
+// search in a single pass. Tabs are ordered most-recently-worked-in first.
+async function reparse() {
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null }); }
+  catch (_) { fail('no open Lens window found — run a search with “Keep the browser open” on first.'); return; }
+  const candidates = [];
+  for (const p of await browser.pages()) {
+    let info;
+    try {
+      info = await p.evaluate(() => ({ url: location.href, last: window.__stLastActive || 0,
+        photoPath: window.__stPhotoPath || '', photoName: window.__stPhotoName || '' }));
+    } catch (_) { continue; }
+    if (!info.url || /^about:blank/.test(info.url)) continue;
+    // still on Google Lens results? (a search / results / lens tab, incl. a refined
+    // multisearch URL) — skip the user's unrelated tabs.
+    if (!/google\.|lens\.|[?&]vsrid=|\/(search|results)\b/.test(info.url)) continue;
+    candidates.push({ page: p, ...info });
+  }
+  if (!candidates.length) {
+    try { browser.disconnect(); } catch (_) {}
+    fail('no open Google Lens results tabs found — run a search with “Keep the browser open” on first.');
+    return;
+  }
+  candidates.sort((a, b) => b.last - a.last);            // most-recently-worked-in first
+  const tabs = [];
+  for (const c of candidates) {
+    // drop our own hint bar so it can't leak into the scraped text
+    try { await c.page.evaluate(() => { const o = document.getElementById('__lens_keepbar'); if (o) o.remove(); }); } catch (_) {}
+    const data = await scrapeRaw(c.page).catch(() => ({ strings: [], overview: '' }));
+    const seen = new Set(); const clean = [];
+    for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
+    if (!clean.length && !data.overview) continue;        // an empty / consent tab — nothing to re-tag
+    tabs.push({ photoPath: c.photoPath, photoName: c.photoName,
+      overview: data.overview || '', strings: clean.slice(0, 80), count: clean.length });
+  }
+  try { browser.disconnect(); } catch (_) {}               // never kill the user's window
+  if (!tabs.length) { fail('the open Lens tabs had no results to re-parse — refine a search and retry.'); return; }
+  out({ ok: true, reparsed: true, tabs: tabs });
+}
+
 // Launch a visible Chrome we DON'T own (detached + connect). puppeteer only kills
 // browsers it *launched*, never connect()ed ones, so we control teardown explicitly.
 async function openDetachedChrome() {
@@ -396,13 +523,24 @@ async function waitForResult(page, parseClicked, cancelClicked) {
   return outcome;
 }
 
+// Kill a detached process tree, cross-platform: taskkill /T on Windows, the
+// negative-PID process-group signal on POSIX (the child was spawned detached, so it
+// leads its own group).
+function killTree(pid) {
+  if (IS_WIN) {
+    try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch (_) {}
+  } else {
+    try { process.kill(-pid, 'SIGTERM'); } catch (_) {}
+  }
+}
+
 // Close down per the launch mode: a connected detached window is disconnected (and
 // killed unless KEEPOPEN); a launched headless browser is killed by puppeteer on exit.
 function teardown(browser, escProc) {
   try {
     if (escProc) {
       try { if (browser) browser.disconnect(); } catch (_) {}
-      if (!KEEPOPEN) { try { process.kill(-escProc.pid, 'SIGTERM'); } catch (_) {} }
+      if (!KEEPOPEN) killTree(escProc.pid);
     }
   } catch (_) {}
 }
@@ -410,7 +548,7 @@ function teardown(browser, escProc) {
 // Final step shared by every success path: drop the overlay, capture debug artifacts,
 // scrape, build the result, tear down, and emit the single JSON line.
 async function emit(page, browser, escProc) {
-  await page.evaluate(() => { const o = document.getElementById('__lens_overlay'); if (o) o.remove(); }).catch(() => {});
+  await page.evaluate(() => { ['__lens_overlay', '__lens_keepbar'].forEach(id => { const o = document.getElementById(id); if (o) o.remove(); }); }).catch(() => {});
   if (DEBUG) {
     try { fs.mkdirSync(DBGDIR, { recursive: true }); } catch (_) {}
     await page.screenshot({ path: path.join(DBGDIR, 'page.png'), fullPage: true }).catch(() => {});
@@ -432,6 +570,7 @@ async function emit(page, browser, escProc) {
 }
 
 (async () => {
+  if (REPARSE) { await reparse(); return; }               // scrape the open tab; no upload
   if (!hasGeo && place) {
     const c = await geocode(place);
     if (c) { lat = c.lat; lng = c.lng; hasGeo = true; }
@@ -452,17 +591,24 @@ async function emit(page, browser, escProc) {
         '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
     }
     try {
-      execSync(`curl -sS --compressed -A ${q(UA)} -b ${q(jar)} -c ${q(jar)} -o /dev/null https://www.google.com/`, { timeout: 30000 });
-      url = execSync(`curl -sS --compressed -L -A ${q(UA)} -b ${q(jar)} -c ${q(jar)} ` +
-        `-H 'Origin: https://www.google.com' -H 'Referer: https://www.google.com/' ` +
-        `-F ${q('encoded_image=@' + img + ';type=image/jpeg')} -o /dev/null -w '%{url_effective}' ` +
-        `'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=${Date.now()}'`, { timeout: 60000 }).toString().trim();
+      curl(['-sS', '--compressed', '-A', UA, '-b', jar, '-c', jar, '-o', NULL_DEVICE, 'https://www.google.com/']);
+      url = curl(['-sS', '--compressed', '-L', '-A', UA, '-b', jar, '-c', jar,
+        '-H', 'Origin: https://www.google.com', '-H', 'Referer: https://www.google.com/',
+        '-F', 'encoded_image=@' + img + ';type=image/jpeg', '-o', NULL_DEVICE, '-w', '%{url_effective}',
+        'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=' + Date.now()]).trim();
     } catch (e) { fail('upload failed: ' + e.message); }              // keep the jar (it's persistent/warm)
     if (!/[?&]vsrid=/.test(url)) fail('upload rejected (no results URL)');
     cookies = fs.readFileSync(jar, 'utf8').split('\n')
       .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
       .map(l => { const p = l.split('\t'); return p.length >= 7 ? { name: p[5], value: p[6], domain: p[0], path: p[2], secure: p[3] === 'TRUE' } : null; })
       .filter(Boolean);
+  }
+  // Add the text refinement (extra keywords + place) to the visual search, if any.
+  // Best-effort multisearch: Lens weighs the image + this text together. If Google
+  // ignores the param, the URL still renders the normal image results.
+  if (QUERY) {
+    url += (url.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(QUERY);
+    dbg('added text refinement to search: ' + QUERY);
   }
   dbg('results URL:', url);
   dbgWrite('results-url.txt', url);
@@ -504,6 +650,10 @@ async function emit(page, browser, escProc) {
     }
     const headed = !TEST_HEADLESS;
     await prepPage(page, cookies, headed);
+
+    // Keep-open tabs stay for follow-ups: stamp each with its photo + show the hint bar
+    // so refined searches can be re-parsed + re-tagged in one batch from Lightroom (issue 8).
+    if (KEEP_TABS) { try { await page.evaluateOnNewDocument(keepOpenBarInjector, PHOTO_PATH, PHOTO_NAME); } catch (_) {} }
 
     if (!INTERACTIVE) {
       // Non-interactive (batch): load, then bail CLEARLY on a challenge so the caller can

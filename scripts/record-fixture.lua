@@ -1,57 +1,53 @@
 #!/usr/bin/env lua
 --[[----------------------------------------------------------------------------
 scripts/record-fixture.lua
-Capture a REAL fixture from a live image so the offline corpus reflects what the
-backends actually return. Saves the provider response and every GBIF response the
+Capture a REAL fixture from a live image so the offline corpus reflects what
+Google Lens actually returns. Saves the Lens response and every GBIF response the
 pipeline touches, then prints a manifest stub to paste into
 spec/fixtures/manifest.lua (fill in the `expected` ground truth yourself).
 
 Usage:
-  lua scripts/record-fixture.lua <image> --provider lens
-  PLANTNET_KEY=...      lua scripts/record-fixture.lua <image> --provider plantnet
-  GOOGLE_VISION_KEY=... lua scripts/record-fixture.lua <image> --provider vision
+  lua scripts/record-fixture.lua <image> [--id <slug>]
 
-The `lens` backend talks to Google directly and needs no key, BUT Google blocks
-automated requests from datacenter / shared IPs — record Lens fixtures from a
-normal residential connection or it will just 403. Requirements: `curl` on PATH
-(used here only — the plugin itself uses LrHttp). Run from the repo root after
+Google Lens needs no key, BUT Google blocks automated requests from datacenter /
+shared IPs — record fixtures from a normal residential connection. Requirements:
+`node` + Google Chrome (for the Lens helper) and `curl` on PATH (used here only —
+the plugin itself uses LrHttp). Run from the repo root after
 `lua build/build.lua --fetch-deps` (for dkjson).
 ------------------------------------------------------------------------------]]
 
 package.path = table.concat( {
-	'src/shared/?.lua', 'build/.deps/?.lua', package.path,
+	'src/shared/?.lua', 'output/deps/?.lua', package.path,
 }, ';' )
 
 local json = require 'dkjson'
 local Providers = require 'Providers'
 local SpeciesParser = require 'SpeciesParser'
 local Taxonomy = require 'Taxonomy'
-local Base64 = require 'Base64'
 
 --------------------------------------------------------------------------------
 -- args
 
-local image, provider, id
+local image, id
 do
 	local i = 1
 	while arg[ i ] do
 		local a = arg[ i ]
-		if a == '--provider' then i = i + 1; provider = arg[ i ]
-		elseif a == '--id' then i = i + 1; id = arg[ i ]
-		elseif a:match( '^%-%-provider=' ) then provider = a:match( '=(.+)$' )
+		if a == '--id' then i = i + 1; id = arg[ i ]
 		elseif a:match( '^%-%-id=' ) then id = a:match( '=(.+)$' )
+		elseif a == '--provider' then i = i + 1 -- accepted + ignored (Lens is the only backend)
+		elseif a:match( '^%-%-provider=' ) then -- ditto
 		elseif not image then image = a end
 		i = i + 1
 	end
 end
-provider = provider or 'lens'
 
 local function die( m ) io.stderr:write( 'record-fixture: ' .. m .. '\n' ); os.exit( 1 ) end
 if not image then die( 'need an image path (see header for usage)' ) end
 id = id or ( image:match( '([^/\\]+)%.%w+$' ) or 'fixture' )
 
 --------------------------------------------------------------------------------
--- a curl-backed http adapter (mirrors Http.lua's get/post/postMultipart shape)
+-- a curl-backed GBIF getter (the plugin itself uses LrHttp; this is dev-only)
 
 local function shquote( s ) return "'" .. tostring( s ):gsub( "'", "'\\''" ) .. "'" end
 
@@ -66,37 +62,6 @@ local function curlGet( url )
 	return run( 'curl -fsS ' .. shquote( url ) .. ' 2>/dev/null' )
 end
 
-local http = {
-	get = curlGet,
-	post = function( url, body, headers )
-		local tmp = os.tmpname()
-		local f = io.open( tmp, 'wb' ); f:write( body ); f:close()
-		local hs = ''
-		for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
-		local out = run( 'curl -fsS -X POST' .. hs .. ' --data-binary @' .. shquote( tmp ) ..
-			' ' .. shquote( url ) .. ' 2>/dev/null' )
-		os.remove( tmp )
-		return out
-	end,
-	-- -L so we follow Google Lens's upload->results redirect like LrHttp does.
-	postMultipart = function( url, parts, headers )
-		local fs = ''
-		for _, p in ipairs( parts ) do
-			if p.filePath then
-				fs = fs .. ' -F ' .. shquote( p.name .. '=@' .. p.filePath ..
-					( p.contentType and ( ';type=' .. p.contentType ) or '' ) )
-			else
-				fs = fs .. ' -F ' .. shquote( p.name .. '=' .. p.value )
-			end
-		end
-		local hs = ''
-		for k, v in pairs( headers or {} ) do hs = hs .. ' -H ' .. shquote( k .. ': ' .. v ) end
-		-- no -f: keep 4xx bodies so the provider can report a real reason (403 /
-		-- consent / Pl@ntNet error) instead of an empty "no response".
-		return run( 'curl -sSL' .. hs .. fs .. ' ' .. shquote( url ) .. ' 2>/dev/null' )
-	end,
-}
-
 local FIX = 'spec/fixtures'
 local function save( relpath, body )
 	local path = FIX .. '/' .. relpath
@@ -110,59 +75,28 @@ local function slug( s )
 	return ( ( s or '' ):lower():gsub( '[^%w]+', '_' ):gsub( '^_+', '' ):gsub( '_+$', '' ) )
 end
 
-local function readBytes( path )
-	local f = assert( io.open( path, 'rb' ), 'cannot read ' .. path )
-	local b = f:read( '*a' ); f:close(); return b
-end
-
 --------------------------------------------------------------------------------
--- 1) provider response (saved as the JSON the offline parser will replay)
+-- 1) Lens response (saved as the JSON the offline parser will replay)
 
-print( 'Recording ' .. provider .. ' fixture for ' .. image )
-local decoded, providerRel
+print( 'Recording Google Lens fixture for ' .. image )
 
-if provider == 'lens' then
-	-- Lens has no API + JS-rendered results, so capture via the browser helper
-	-- (scripts/lens): it returns JSON { ok, strings } — the strings are what the
-	-- offline parser harvests, so save them as the fixture. Needs node + Chrome.
-	local raw = run( 'node ' .. shquote( 'scripts/lens/lens-search.js' ) .. ' ' .. shquote( image ) .. ' 2>/dev/null' )
-	local d = raw and raw ~= '' and json.decode( raw )
-	if type( d ) ~= 'table' then die( 'lens helper produced no/!bad output (run `cd scripts/lens && npm i`?)' ) end
-	if not d.ok then die( 'lens helper: ' .. tostring( d.error ) ) end
-	decoded = d.strings
-	providerRel = 'lens/' .. id .. '.json'
-	save( providerRel, json.encode( decoded, { indent = true } ) )
-elseif provider == 'plantnet' then
-	local PlantNet = Providers.get( 'plantnet' )
-	local key = os.getenv( 'PLANTNET_KEY' ) or die( 'set PLANTNET_KEY' )
-	local body = http.postMultipart(
-		PlantNet.buildUrl { apiKey = key, project = 'all' },
-		PlantNet.buildParts { imageFile = image } )
-	if not body or body == '' then die( 'no response from Pl@ntNet' ) end
-	providerRel = 'plantnet/' .. id .. '.json'
-	save( providerRel, body )
-	decoded = json.decode( body )
-elseif provider == 'vision' then
-	local Vision = Providers.get( 'vision' )
-	local key = os.getenv( 'GOOGLE_VISION_KEY' ) or die( 'set GOOGLE_VISION_KEY' )
-	local body = http.post( Vision.endpointWithKey( key ),
-		Vision.buildBody( Base64.encode( readBytes( image ) ), 15 ),
-		{ [ 'Content-Type' ] = 'application/json' } )
-	if not body or body == '' then die( 'no response from Google Vision' ) end
-	providerRel = 'vision/' .. id .. '.json'
-	save( providerRel, body )
-	decoded = json.decode( body )
-else
-	die( 'unknown provider: ' .. provider .. ' (lens | plantnet | vision)' )
-end
-
-if not decoded then die( 'could not decode the provider response' ) end
+-- Lens has no API + JS-rendered results, so capture via the browser helper
+-- (scripts/lens): it returns JSON { ok, overview, strings } — the strings + AI
+-- overview are what the offline parser harvests, so save them as the fixture.
+-- Needs node + Chrome.
+local raw = run( 'node ' .. shquote( 'scripts/lens/lens-search.js' ) .. ' ' .. shquote( image ) .. ' 2>/dev/null' )
+local d = raw and raw ~= '' and json.decode( raw )
+if type( d ) ~= 'table' then die( 'lens helper produced no/!bad output (run `cd scripts/lens && npm i`?)' ) end
+if not d.ok then die( 'lens helper: ' .. tostring( d.error ) ) end
+local decoded = { overview = d.overview, strings = d.strings }
+local providerRel = 'lens/' .. id .. '.json'
+save( providerRel, json.encode( decoded, { indent = true } ) )
 
 --------------------------------------------------------------------------------
 -- 2) GBIF responses for each candidate the pipeline would resolve
 
-local prov = Providers.get( provider )
-local cands = SpeciesParser.candidates( prov.parse( decoded ), { max = 12 } )
+local Lens = Providers.get( 'lens' )
+local cands = SpeciesParser.candidates( Lens.parse( decoded ), { max = 12 } )
 
 local function recordVern( key )
 	if not key then return end
@@ -174,8 +108,8 @@ for _, c in ipairs( cands ) do
 	if c.kind == 'scientific' then
 		local body = curlGet( Taxonomy.matchUrl( c.name ) )
 		save( 'gbif/match_' .. slug( c.name ) .. '.json', body )
-		local d = json.decode( body )
-		if d and d.usageKey and d.matchType ~= 'NONE' then recordVern( d.usageKey ) end
+		local m = json.decode( body )
+		if m and m.usageKey and m.matchType ~= 'NONE' then recordVern( m.usageKey ) end
 	else
 		local body = curlGet( Taxonomy.searchUrl( c.name ) )
 		save( 'gbif/search_' .. slug( c.name ) .. '.json', body )
@@ -195,9 +129,9 @@ print( '\nAdd this case to spec/fixtures/manifest.lua and fill in `expected`:\n'
 print( string.format( [[	{
 		id = %q,
 		image = %q,
-		provider = %q,
+		provider = 'lens',
 		response = %q,
 		expected = {
 			{ common = '?', scientific = '?', genus = '?', family = '?' },
 		},
-	},]], id .. '_' .. provider, ( image:match( '([^/\\]+)$' ) or image ), provider, providerRel ) )
+	},]], id .. '_lens', ( image:match( '([^/\\]+)$' ) or image ), providerRel ) )

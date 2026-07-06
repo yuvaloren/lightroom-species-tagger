@@ -9,21 +9,29 @@ so the defaults can't silently drift. Pure (takes a prefs-like table).
 local M = {}
 
 M.DEFAULTS = {
-	-- 'lens' (Google Lens, direct & keyless) | 'vision' (Google Vision) | 'plantnet'
+	-- The recognition backend. Currently only Google Lens (direct & keyless); kept
+	-- as a setting so another backend can be added without changing the pipeline.
 	backend = 'lens',
 
-	visionApiKey = '',
-	plantNetKey = '',
-	plantNetProject = 'all', -- Pl@ntNet flora project ('all' = worldwide)
-
-	-- Google Lens backend shells out to the bundled Node + Chrome helper. GUI apps
-	-- get a minimal PATH, so set this if `node` isn't auto-found (e.g.
-	-- /opt/homebrew/bin/node). Leave blank to auto-detect.
+	-- The Lens backend shells out to the bundled Node + Chrome helper. GUI apps get
+	-- a minimal PATH, so set this if `node` isn't auto-found (e.g.
+	-- /opt/homebrew/bin/node, or C:\Program Files\nodejs\node.exe). Blank = auto-detect.
 	nodePath = '',
 
 	-- Lens: keep the Chrome window open after each photo (a new tab per photo) so you
-	-- can do follow-ups (e.g. ask Google's AI more). Off = a popup that closes per photo.
+	-- can refine the search and re-parse it (see TagSpecies "re-parse"), or ask
+	-- Google's AI more. Off = a popup window that closes after each photo.
 	lensKeepOpen = false,
+
+	-- Whether the one-time first-run welcome (points at the settings + how to run) has
+	-- been shown. Flipped to true the first time the action runs; see TagSpecies.
+	firstRunDone = false,
+
+	-- Ask for extra keywords to add to the Lens search at the start of each run
+	-- (issue: "prompt you for additional keywords"). lastExtraKeywords remembers the
+	-- previous entry to prefill the prompt.
+	promptExtraKeywords = true,
+	lastExtraKeywords = '',
 
 	-- Keywording
 	keywordMode = 'flat', -- 'flat' | 'hierarchy' | 'both'  (flat = just the common + Latin name)
@@ -32,7 +40,9 @@ M.DEFAULTS = {
 	includeOnExport = true,
 	needsReviewKeyword = 'species: needs review',
 
-	-- Decisioning
+	-- Decisioning. This is an operating point on a bounded evidence score (0..1), NOT
+	-- a calibrated probability — see docs/SCORING.md and Identify.lua for exactly what
+	-- drives it and how to tune it against your own captures.
 	autoApplyThreshold = 0.62,
 
 	-- Image prep
@@ -49,26 +59,14 @@ function M.load( prefs )
 	return cfg
 end
 
--- Validate that the chosen backend has the credentials it needs.
--- Returns ok, message.
+-- Validate that the chosen backend is usable. Returns ok, message.
 function M.validate( cfg )
 	if cfg.backend == 'lens' then
 		-- Lens needs no key (it drives the bundled browser helper); nothing to
 		-- validate here. Missing Node/Chrome is reported at run time, per photo.
 		return true
-	elseif cfg.backend == 'vision' then
-		if not cfg.visionApiKey or cfg.visionApiKey == '' then
-			return false, 'Add your Google Vision API key in the plugin settings.'
-		end
-	elseif cfg.backend == 'plantnet' then
-		if not cfg.plantNetKey or cfg.plantNetKey == '' then
-			return false, 'Add your free Pl@ntNet API key in the plugin settings ' ..
-				'(get one at my.plantnet.org).'
-		end
-	else
-		return false, 'Unknown backend: ' .. tostring( cfg.backend )
 	end
-	return true
+	return false, 'Unknown backend: ' .. tostring( cfg.backend )
 end
 
 return M

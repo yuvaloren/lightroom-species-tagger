@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# build.sh — build the SpeciesTagger.lrplugin bundle into dist/.
+# build.sh — build the SpeciesTagger.lrplugin bundle into output/dist/.
 #
 # On the very FIRST build (when no Google Lens results have been captured yet) it
 # also captures real Lens output for the ground-truth corpus, so accuracy/tuning
@@ -22,5 +22,5 @@ if [[ -z "${SKIP_CAPTURE:-}" && -z "$captured" && -n "$have_images" ]]; then
 	bash "$(dirname "$0")/capture.sh" || say "WARNING: capture failed — building anyway; run ./capture.sh later."
 fi
 
-say "building the plugin bundle into dist/"
+say "building the plugin bundle into output/dist/"
 exec lua build/build.lua "$@"

@@ -1,17 +1,18 @@
 --[[----------------------------------------------------------------------------
 Providers.lua
-Registry + common contract for the recognition backends. A provider is a module
+Registry + common contract for the recognition backend(s). A provider is a module
 exposing:
 
-  id            : short string ('lens', 'vision', 'plantnet')
-  label         : human label for the settings popup
-  needsImageFile: true if fetch() uploads the image as an LrHttp multipart file
-                  (Lens, Pl@ntNet) vs. sending bytes inline in a JSON body (Vision)
+  id            : short string (currently just 'lens')
+  label         : human label for the settings panel
+  needsImageFile: true if identify() needs the image as a file on disk (Lens does
+                  — its browser helper takes a file path)
   parse(decoded)        -> observations[]            (PURE — unit tested)
   identify(opts, deps)  -> observations[], errString  (fetch + parse)
 
-Keeping providers behind one seam is what lets the parser/scorer/test layers stay
-identical no matter which backend produced the observations.
+Keeping the provider behind one seam is what lets the parser/scorer/test layers
+stay identical regardless of the recognition source, and leaves room to add
+another backend later without touching the pipeline.
 ------------------------------------------------------------------------------]]
 
 local M = { _byId = {}, _order = {} }
@@ -37,10 +38,8 @@ function M.ids()
 	return out
 end
 
--- Register the built-ins (these modules do not require Providers, so no cycle).
--- Order here is the order shown in the settings popup; 'lens' is the default.
+-- Register the built-in(s). The provider module does not require Providers, so
+-- there's no cycle. Google Lens is the only backend (free, keyless).
 M.register( require 'ProviderGoogleLens' )
-M.register( require 'ProviderGoogleVision' )
-M.register( require 'ProviderPlantNet' )
 
 return M

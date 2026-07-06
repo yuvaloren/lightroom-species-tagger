@@ -1,8 +1,6 @@
 require 'support.fixtures'
 local Providers = require 'Providers'
 local Lens = require 'ProviderGoogleLens'
-local Vision = require 'ProviderGoogleVision'
-local PlantNet = require 'ProviderPlantNet'
 local fixtures = require 'support.fixtures'
 
 local function find( obs, text )
@@ -17,14 +15,16 @@ local function texts( obs )
 end
 
 describe( 'Providers registry', function()
-	it( 'registers the lens, vision and plantnet backends', function()
+	it( 'registers the keyless Google Lens backend', function()
 		assert.is_truthy( Providers.get( 'lens' ) )
-		assert.is_truthy( Providers.get( 'vision' ) )
-		assert.is_truthy( Providers.get( 'plantnet' ) )
-		assert.is_true( #Providers.all() >= 3 )
+		assert.equal( 1, #Providers.all() )
 	end )
-	it( 'defaults to the keyless Google Lens backend first', function()
+	it( 'defaults to the Google Lens backend first', function()
 		assert.equal( 'lens', Providers.ids()[ 1 ] )
+	end )
+	it( 'has no other backends registered', function()
+		assert.is_nil( Providers.get( 'vision' ) )
+		assert.is_nil( Providers.get( 'plantnet' ) )
 	end )
 end )
 
@@ -94,75 +94,5 @@ describe( 'ProviderGoogleLens', function()
 	it( 'identify() errors clearly when no helper is wired in', function()
 		local _, err = Lens.identify( { imageFile = '/tmp/x.jpg' }, {} )
 		assert.matches( 'helper', err )
-	end )
-end )
-
-describe( 'ProviderGoogleVision', function()
-	it( 'parses bestGuessLabels, webEntities and matching-page titles', function()
-		local d = assert( fixtures.loadJson( 'vision/reef_octopus_triggerfish.json' ) )
-		local obs = Vision.parse( d )
-		assert.equal( 9, #obs ) -- 1 bestguess + 6 entities + 2 pages
-		assert.equal( 'label', find( obs, 'sufflamen bursa' ).kind )
-		assert.is_truthy( find( obs, 'Octopus cyanea' ) )
-	end )
-
-	it( 'builds a WEB_DETECTION request body with inline image content', function()
-		local body = Vision.buildBody( 'QkFTRTY0', 7 )
-		assert.matches( 'WEB_DETECTION', body )
-		assert.matches( 'QkFTRTY0', body )
-	end )
-end )
-
-describe( 'ProviderPlantNet', function()
-	local sample = {
-		results = {
-			{ score = 0.91, species = {
-				scientificNameWithoutAuthor = 'Plumeria rubra',
-				genus = { scientificNameWithoutAuthor = 'Plumeria' },
-				family = { scientificNameWithoutAuthor = 'Apocynaceae' },
-				commonNames = { 'Frangipani', 'Red paucipan' },
-			} },
-			{ score = 0.04, species = {
-				scientificNameWithoutAuthor = 'Plumeria obtusa',
-				commonNames = { 'Singapore graveyard flower' },
-			} },
-		},
-	}
-
-	it( 'emits scientific + common observations weighted by score', function()
-		local obs = PlantNet.parse( sample )
-		assert.is_truthy( find( obs, 'Plumeria rubra' ) )
-		assert.is_truthy( find( obs, 'Frangipani' ) )
-		assert.equal( 'label', find( obs, 'Plumeria rubra' ).kind )
-		-- top hit (score 0.91) outweighs the long-shot (0.04)
-		assert.is_true( find( obs, 'Plumeria rubra' ).weight > find( obs, 'Plumeria obtusa' ).weight )
-	end )
-
-	it( 'returns nothing for an error / empty body', function()
-		assert.equal( 0, #PlantNet.parse { statusCode = 404, message = 'Species not found' } )
-		assert.equal( 0, #PlantNet.parse( nil ) )
-	end )
-
-	it( 'builds an identify URL with the project and api-key', function()
-		local url = PlantNet.buildUrl { apiKey = 'KEY', project = 'all' }
-		assert.matches( '/v2/identify/all', url )
-		assert.matches( 'api%-key=KEY', url )
-		local parts = PlantNet.buildParts { imageFile = '/tmp/x.jpg' }
-		assert.equal( 'organs', parts[ 1 ].name )
-		assert.equal( 'images', parts[ 2 ].name )
-	end )
-
-	it( 'identify() posts multipart and parses the response', function()
-		local http = { postMultipart = function()
-			return '{"results":[{"score":0.88,"species":{"scientificNameWithoutAuthor":"Plumeria rubra",' ..
-				'"commonNames":["Frangipani"]}}]}'
-		end }
-		local obs = PlantNet.identify( { imageFile = '/tmp/x.jpg', apiKey = 'k' }, { http = http } )
-		assert.is_truthy( find( obs, 'Plumeria rubra' ) )
-	end )
-
-	it( 'identify() errors without an API key', function()
-		local _, err = PlantNet.identify( { imageFile = '/tmp/x.jpg' }, { http = {} } )
-		assert.matches( 'API key', err )
 	end )
 end )

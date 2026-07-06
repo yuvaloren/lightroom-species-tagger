@@ -21,6 +21,10 @@ return {
 			file = 'SpeciesTaggerMenuItem.lua',
 		},
 		{
+			title = LOC '$$$/SpeciesTagger/ReparseMenu=Re-parse Open Lens Tabs & Re-tag…',
+			file = 'ReparseMenuItem.lua',
+		},
+		{
 			title = LOC '$$$/SpeciesTagger/DebugMenu=Debug Lens on Selected Photo (headed)…',
 			file = 'SpeciesTaggerDebugMenuItem.lua',
 		},

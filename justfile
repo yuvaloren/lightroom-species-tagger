@@ -67,7 +67,7 @@ lens-test:
 live-accuracy *FLAGS: _deps
     lua scripts/live-accuracy.lua {{FLAGS}}
 
-# compose dist/ bundle (version from VERSION / tag), zip + checksums
+# compose the bundle into output/dist (version from VERSION / tag), zip + checksums
 build:
     lua build/build.lua
 
@@ -86,11 +86,13 @@ changelog:
 # full local gate before pushing: lint + test + build
 check: lint test build
 
-# remove build + coverage artifacts (keeps pulled deps; use clean-all to drop those)
+# remove EVERYTHING generated — the whole output/ tree (bundle + pulled deps) +
+# coverage artifacts. The next `just build`/`just test` regenerates what it needs.
 clean:
-    rm -rf dist
+    rm -rf output
     rm -f luacov.stats.out luacov.report.out
 
-# also drop the pulled-dependency cache
+# a full reset: also drop the pinned Lua toolchain + the Lens helper's node_modules
+# (re-create them with ./dev-setup.sh and `cd scripts/lens && npm ci`)
 clean-all: clean
-    rm -rf build/.deps
+    rm -rf .lua-env scripts/lens/node_modules

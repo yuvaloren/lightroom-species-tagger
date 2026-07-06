@@ -1,30 +1,44 @@
-# Build output + pulled dependencies (never committed; pulled at build time)
-/dist/
-/build/.deps/
+# ─────────────────────────────────────────────────────────────────────────────
+# Nothing generated or third-party is committed. Everything below is reproducible
+# from source (see the "Repository layout" section of README.md). If you're asking
+# "is all that code in output/ / node_modules ours?" — no: those are the trees here.
+# ─────────────────────────────────────────────────────────────────────────────
 
-# Pinned local Lua toolchain (created by ./dev-setup.sh)
+# GENERATED — the ONE output tree. Removed by `just clean`. Holds:
+#   output/dist/  the composed .lrplugin bundle + zips (build/build.lua from src/)
+#   output/deps/  the one pulled Lua runtime dep (dkjson), fetched via LuaRocks
+/output/
+
+# THIRD-PARTY (pulled) — Node deps for the Google Lens browser helper (puppeteer-core),
+# installed with `npm ci` in scripts/lens. Pure JS; not ours. It can't live under
+# output/ because Node resolves modules next to package.json. (package-lock.json IS
+# committed, so installs are reproducible and CI can bundle it into the release.)
+/scripts/lens/node_modules/
+
+# TOOLCHAIN (pinned) — the isolated Lua 5.1 + LuaRocks env created by ./dev-setup.sh.
+# Not "output"; it's your installed dev env. `just clean-all` removes it.
 /.lua-env/
 
-# Test coverage artifacts
+# Test coverage artifacts.
 luacov.stats.out
 luacov.report.out
 
-# Live test images are the user's own photos — never committed. Drop originals
-# into spec/fixtures/images/ to enable live recording / live accuracy runs.
+# ─────────────────────────────────────────────────────────────────────────────
+# Never-commit user data (real photos / captures can carry personal EXIF or tokens).
+# ─────────────────────────────────────────────────────────────────────────────
+
+# Live test images are your own photos — never committed. Drop originals into
+# spec/fixtures/images/ to enable live recording / live-accuracy runs.
 /spec/fixtures/images/*
 !/spec/fixtures/images/.gitkeep
 !/spec/fixtures/images/README.md
 
-# Raw Google Lens HTML dumped by `build-corpus.lua --live` (for auditing the
-# captures) — large and may carry transient session tokens; never committed.
+# Raw Google Lens HTML dumped by `build-corpus.lua --live` (for auditing captures) —
+# large and may carry transient session tokens; never committed.
 /spec/fixtures/lens/raw/
 
-# Node deps for the Google Lens browser helper (scripts/lens) — pulled with `npm i`.
-/scripts/lens/node_modules/
-/scripts/lens/package-lock.json
+# Cached live Google Lens captures for offline accuracy tuning (from real photos).
+/spec/fixtures/live/
 
 # macOS
 .DS_Store
-
-# Cached live Google Lens captures for offline accuracy tuning (real photos).
-/spec/fixtures/live/

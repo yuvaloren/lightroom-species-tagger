@@ -11,6 +11,8 @@ read_globals = {
 	'import',   -- LR namespace loader
 	'LOC',      -- localization helper
 	'_PLUGIN',  -- plugin object
+	'WIN_ENV',  -- true on Windows (Lightroom global)
+	'MAC_ENV',  -- true on macOS (Lightroom global)
 }
 
 ignore = {

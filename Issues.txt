@@ -1,0 +1,14 @@
+The first time you run the plugin, it should show you all of the settings available in the plugin preferences and tell you where to find it next time. 
+Add a feature on every run to prompt you for additional keywords, which will be included in the Google Lens search. 
+I want this to work on Windows as well. Figure out a way to make that happen. 
+Include any photo location as keywords in the Google Lens search so that location is factored in. 
+This needs to be really easy to use as a part of making this ready to open source and distribute. 
+Figure out how I can put this on Adobe's plugin catalog. 
+There's a lot of code in scripts/lints/node_modules. Is that all our code? 
+Add a feature to enable doing subsequent searches to correct results in the browser tab left open and have that correct the tagging. I think the means will need a button in the browser window to let you re-parse the results.
+This needs to be a model project: super clean, really easy to run tests and deploy without the use of AI. 
+The test corpus we build should not have anything specific to me or my accounts. None of the code should be specific to my images. Find another friendly source to build the corpus. 
+Is the confidence score based on anything? It seems to be made up. If it's based on the corpus, then we need a much bigger corpus, and we should fix that. 
+All the generated code should be in a separate top-level directory tree. Maybe something like gen source, or some other best practice. 
+Remove everything related to vision or plant net or the other sources that we are no longer using. 
+Thoroughly analyze the project and improve it so that it is a model project for anybody looking at potentially hiring me as an engineer will be impressed. 

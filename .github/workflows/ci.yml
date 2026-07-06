@@ -8,6 +8,7 @@ on:
   workflow_dispatch:
 
 jobs:
+  # ── Lua: lint + unit/accuracy tests + build the distributable bundle ──────────
   build:
     runs-on: ubuntu-latest
     permissions:
@@ -45,6 +46,14 @@ jobs:
           luacov
           tail -n 30 luacov.report.out || true
 
+      # Node deps for the Lens helper, so the built bundle is self-contained
+      # (end users unzip and run — no npm needed). puppeteer-core is pure JS.
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - name: Install the Lens helper deps (bundled into the release)
+        run: cd scripts/lens && npm ci
+
       - name: Version drift guard (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
         run: |
@@ -58,7 +67,7 @@ jobs:
           fi
           echo "version ok: $TAG"
 
-      - name: Build bundle
+      - name: Build bundle (includes the Lens helper + its node_modules)
         run: lua build/build.lua
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
@@ -69,8 +78,8 @@ jobs:
         with:
           name: lrplugin
           path: |
-            dist/*.zip
-            dist/checksums.txt
+            output/dist/*.zip
+            output/dist/checksums.txt
 
       - name: Generate release notes (tags only)
         id: cliff
@@ -88,5 +97,24 @@ jobs:
           body: ${{ steps.cliff.outputs.content }}
           generate_release_notes: true
           files: |
-            dist/*.zip
-            dist/checksums.txt
+            output/dist/*.zip
+            output/dist/checksums.txt
+
+  # ── Node: drive the REAL Lens helper against a local fake Google (no network) ──
+  lens-helper:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+      - uses: browser-actions/setup-chrome@v1
+        id: setup-chrome
+      - name: Install the Lens helper deps
+        run: cd scripts/lens && npm ci
+      - name: Interactive challenge-flow + overlay tests (fake Google, headless)
+        env:
+          LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+        run: |
+          node scripts/lens/test/integration.test.js
+          node scripts/lens/test/overlay-frame.test.js

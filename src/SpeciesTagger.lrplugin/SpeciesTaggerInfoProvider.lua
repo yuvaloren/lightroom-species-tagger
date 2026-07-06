@@ -8,7 +8,6 @@ local LrView = import 'LrView'
 local LrPrefs = import 'LrPrefs'
 
 local Config = require 'Config'
-local Providers = require 'Providers'
 
 local M = {}
 
@@ -34,45 +33,33 @@ function M.sectionsForTopOfDialog( f, _ )
 	end
 	local labelW = LrView.share 'st_label_width'
 
-	local backendItems = {}
-	for _, p in ipairs( Providers.all() ) do
-		backendItems[ #backendItems + 1 ] = { title = p.label, value = p.id }
-	end
-
 	return {
 		{
-			title = 'Recognition backend',
-			f:row {
-				f:static_text { title = 'Backend:', width = labelW, alignment = 'right' },
-				f:popup_menu { value = bind 'backend', items = backendItems },
-			},
+			title = 'Recognition (Google Lens)',
 			f:static_text {
-				title = 'Google Lens needs no key — the plugin opens your installed Google Chrome ' ..
-					'(in a visible window, so you see Google’s real page) to run a Lens image search. ' ..
-					'It needs Node.js + Google Chrome on this machine (macOS/Linux). Pl@ntNet (plants ' ..
-					'only) and Google Vision are alternative backends that use their own key below. ' ..
-					'See docs/PRIVACY.md for what leaves your machine.',
-				wrap = true, width = 540, height_in_lines = 3,
+				title = 'Species are recognised with Google Lens — free, no API key. The plugin opens ' ..
+					'your installed Google Chrome (a visible window, so you see Google’s real page) to run ' ..
+					'a Lens image search, then resolves the names through the GBIF taxonomy backbone. ' ..
+					'It needs Node.js + Google Chrome installed on this machine (macOS, Linux or Windows). ' ..
+					'See docs/PRIVACY.md for exactly what leaves your machine.',
+				wrap = true, width = 540, height_in_lines = 4,
 			},
 			f:row {
 				f:checkbox {
-					title = 'Keep the browser open (a new tab per photo) for follow-ups, e.g. asking Google’s AI',
+					title = 'Keep the browser open (a new tab per photo) so you can refine the search and re-parse it',
 					value = bind 'lensKeepOpen',
 				},
 			},
 			f:row {
 				f:static_text { title = 'node path:', width = labelW, alignment = 'right' },
 				f:edit_field { value = bind 'nodePath', width_in_chars = 40 },
-				f:static_text { title = '(Lens; blank = auto)' },
+				f:static_text { title = '(blank = auto-detect)' },
 			},
-			f:row {
-				f:static_text { title = 'Pl@ntNet key:', width = labelW, alignment = 'right' },
-				f:password_field { value = bind 'plantNetKey', width_in_chars = 40 },
-				f:static_text { title = '(free at my.plantnet.org)' },
-			},
-			f:row {
-				f:static_text { title = 'Google Vision key:', width = labelW, alignment = 'right' },
-				f:password_field { value = bind 'visionApiKey', width_in_chars = 40 },
+			f:static_text {
+				title = 'Set node path only if Lightroom can’t find Node on its own (its GUI gets a minimal ' ..
+					'PATH) — e.g. /opt/homebrew/bin/node, /usr/local/bin/node, or ' ..
+					'C:\\Program Files\\nodejs\\node.exe.',
+				wrap = true, width = 540, height_in_lines = 2,
 			},
 		},
 		{
@@ -114,6 +101,12 @@ function M.sectionsForTopOfDialog( f, _ )
 			},
 			f:row {
 				f:checkbox { title = 'Include applied keywords on export', value = bind 'includeOnExport' },
+			},
+			f:row {
+				f:checkbox {
+					title = 'Ask for extra keywords at the start of each run (added to the Lens search)',
+					value = bind 'promptExtraKeywords',
+				},
 			},
 			f:row {
 				f:static_text { title = 'Version: ' .. version },

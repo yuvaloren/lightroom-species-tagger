@@ -10,7 +10,7 @@ guard so a parser/scorer change that quietly drops accuracy fails the build.
 ------------------------------------------------------------------------------]]
 
 package.path = table.concat( {
-	'src/shared/?.lua', 'build/.deps/?.lua', 'spec/?.lua', package.path,
+	'src/shared/?.lua', 'output/deps/?.lua', 'spec/?.lua', package.path,
 }, ';' )
 
 local fixtures = require 'support.fixtures'

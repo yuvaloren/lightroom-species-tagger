@@ -29,14 +29,14 @@ fi
 export PATH="$PWD/.lua-env/bin:$PATH"
 
 # 2. Google Lens helper deps (puppeteer-core; drives your installed Google Chrome).
-#    Non-fatal: the plugin still installs, and Pl@ntNet/Vision work without it.
+#    Required for recognition to work — but non-fatal here so the bundle still builds.
 if [[ -f scripts/lens/package.json ]]; then
 	if command -v npm >/dev/null 2>&1; then
 		say "installing the Google Lens helper deps (cd scripts/lens && npm i)"
-		( cd scripts/lens && npm i ) || say "WARNING: 'npm i' failed — the Google Lens backend won't work until it succeeds (Pl@ntNet/Vision still will)."
+		( cd scripts/lens && npm i ) || say "WARNING: 'npm i' failed — recognition won't work until it succeeds. Re-run after fixing Node/npm."
 	else
 		say "WARNING: npm not found — skipping the Google Lens helper deps."
-		say "         The Lens backend needs Node.js + Google Chrome (macOS/Linux); install Node, then re-run."
+		say "         Recognition needs Node.js + Google Chrome; install Node, then re-run."
 	fi
 fi
 
@@ -45,5 +45,5 @@ say "building the plugin and symlinking it into the Lightroom Modules folder"
 lua build/build.lua --install
 
 say "done. In Lightroom Classic: Plug-in Manager picks it up on launch (or use Reload"
-say "after a rebuild). Choose a backend in its settings — the default Google Lens needs"
-say "Node.js + Google Chrome on PATH (macOS/Linux); Pl@ntNet/Vision just need their key."
+say "after a rebuild). Recognition uses Google Lens (free, no key) and needs Node.js +"
+say "Google Chrome installed; set the node path in the plugin settings if it isn't auto-found."

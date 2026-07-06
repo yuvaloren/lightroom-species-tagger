@@ -1,9 +1,9 @@
 #!/usr/bin/env lua
 --[[----------------------------------------------------------------------------
 build/build.lua
-Composes the installable SpeciesTagger.lrplugin bundle in dist/ from src/, stamps
-the version into Info.lua, zips it, writes checksums, and (optionally) installs it
-into the local Lightroom Modules folder for development.
+Composes the installable SpeciesTagger.lrplugin bundle in output/dist/ from src/,
+stamps the version into Info.lua, zips it, writes checksums, and (optionally)
+installs it into the local Lightroom Modules folder for development.
 
 Only dependency is luafilesystem (`luarocks install luafilesystem`). The plugin's
 single third-party runtime dependency (dkjson) is pulled via LuaRocks at build
@@ -53,8 +53,12 @@ end
 local SCRIPT = abspath( arg[ 0 ] )
 local ROOT = dirname( dirname( SCRIPT ) ) -- build/build.lua -> repo root
 local SRC = ROOT .. '/src'
-local DIST = ROOT .. '/dist'
-local DEPS = ROOT .. '/build/.deps' -- gitignored cache for pulled dependencies
+-- Everything this build generates lives under one gitignored top-level tree,
+-- `output/` (removed by `just clean`): the composed bundle + zips in output/dist,
+-- and the pulled Lua dependency (dkjson) cached in output/deps.
+local OUTPUT = ROOT .. '/output'
+local DIST = OUTPUT .. '/dist'
+local DEPS = OUTPUT .. '/deps'
 
 --------------------------------------------------------------------------------
 -- small helpers

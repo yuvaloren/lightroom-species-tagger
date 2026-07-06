@@ -4,301 +4,246 @@ Identify the **plants and animals** in your photos and tag them with both the
 **common name** and the **Latin (scientific) name** — straight from the Library
 module in **Adobe Lightroom Classic**.
 
-It asks an image-recognition backend what's in the photo — by default **Google
-Lens directly** (no paid API, no key) — then resolves every name through the
-[GBIF](https://www.gbif.org/) taxonomic backbone so the keywords you get are
-canonical and consistent — `Octopus cyanea` + `Day octopus`, not whatever a
-random web page happened to call it. Optionally it writes the **full taxonomic
-hierarchy** (Kingdom → … → Species) as nested keywords too.
+It asks **Google Lens** what's in the photo — no paid API, no key — then resolves
+every name through the [GBIF](https://www.gbif.org/) taxonomic backbone so the
+keywords you get are canonical and consistent — `Octopus cyanea` + `Day octopus`,
+not whatever a random web page happened to call it. Optionally it writes the full
+taxonomic hierarchy (Kingdom → … → Species) as nested keywords too.
 
-> Why not just a vision LLM? In testing, general multimodal models (Gemini, etc.)
-> were noticeably less accurate at species than Google Lens / reverse-image
-> search. This plugin leans on that image-search signal and adds a real taxonomy
-> resolver on top, with a built-in accuracy harness so quality is measurable and
-> regressions are caught.
+> **Why Google Lens, not a vision LLM?** For species specifically, Google's
+> reverse-image-search signal was consistently more accurate in testing than
+> general multimodal models. This plugin leans on that signal and adds a real
+> taxonomy resolver plus a transparent, tunable confidence model on top — with a
+> built-in accuracy harness so quality is measurable and regressions are caught.
+
+- [What it does](#what-it-does)
+- [Install (from a release)](#install-from-a-release)
+- [Using it](#using-it)
+- [Settings](#settings)
+- [How it works](#how-it-works)
+- [Accuracy — honest numbers, no regressions](#accuracy--honest-numbers-no-regressions)
+- [Building from source](#building-from-source)
+- [Repository layout — authored vs. generated](#repository-layout--authored-vs-generated)
+- [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](#contributing) · [License](#license)
+
+## What it does
+
+- **One command** tags every selected photo with its species (common + Latin name).
+- **Multi-subject frames work:** every species that clears the confidence threshold
+  is tagged, so a reef shot with a fish *and* an octopus gets both.
+- **Uncertain?** The photo gets a `species: needs review` keyword instead of a guess.
+- **Adds context to the search:** it can fold the photo's **location** and any
+  **extra keywords you type** into the Lens search (see [Using it](#using-it)).
+- **Correct a wrong result** without re-shooting: refine the search in the browser
+  tab it left open and **re-parse** it to re-tag the photo.
+- **Cross-platform:** macOS, Linux, and Windows.
+
+## Install (from a release)
+
+You need **Node.js** and **Google Chrome** installed (that's what runs the Lens
+search). Then:
+
+1. Download the latest `SpeciesTagger.lrplugin-*.zip` from
+   [Releases](https://github.com/yoren/lightroom-species-tagger/releases) and unzip.
+   The bundle is **self-contained** — the Lens helper's dependencies are already
+   inside it, so there's nothing to `npm install`.
+2. Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select the
+   `SpeciesTagger.lrplugin` folder.
+3. The first time you run it, a short **welcome** lists every setting and where to
+   find it. Open **Plug-in Manager ▸ Species Tagger** any time to adjust them.
+4. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
+   Tag Species**.
+
+> Google gates the Lens endpoint on the **network you run from** — use a normal home
+> (residential) connection; datacenter/VPN/shared IPs get challenged or blocked. On
+> any failure a photo simply falls through to *needs review* — it never crashes or
+> mis-tags.
+
+## Using it
+
+Select one or more photos and run **Library ▸ Plug-in Extras ▸ Identify and Tag
+Species**. A Chrome window opens showing Google's real results page (never a hidden
+scrape); if Google shows an "are you human" check on a single-photo run, a bar lets
+you solve it and continue.
+
+Each run can add text to the image search so Lens weighs picture **and** words:
+
+- **Extra keywords** — you're prompted at the start of each run (toggle this off in
+  settings). Type things like `juvenile`, `reef`, or a place; leave blank for a
+  plain image search.
+- **Location** — if the photo has GPS or IPTC place fields, the location is used as
+  browser geolocation *and* added to the search text as `in <place>` (e.g.
+  `in Monterey, California`), so Lens reads it as *where the photo was taken* — a
+  locality hint that favours species occurring there — rather than as the subject.
+
+**Correcting results (re-parse).** Turn on **Keep the browser open** in settings.
+Now each photo's results stay in its own tab. Fix as many as you like — refine the
+search in any tab(s) (Lens lets you add words, crop, or pick a different match) —
+then in Lightroom run **Plug-in Extras ▸ Re-parse Open Lens Tabs & Re-tag** once. It
+sweeps **every** open Lens tab, re-tags each tab's own photo from your corrected
+search (no new upload, no marking, no per-photo selection), and reports what changed.
+
+## Settings
+
+Open **Plug-in Manager ▸ Species Tagger**.
+
+| Setting | What it does |
+|---|---|
+| Keep the browser open | Reuse one Chrome window (a tab per photo) so you can refine + re-parse a search |
+| node path | Set only if Lightroom can't auto-find Node (its GUI gets a minimal PATH) — e.g. `/opt/homebrew/bin/node` or `C:\Program Files\nodejs\node.exe` |
+| Keywords | `flat` (common + Latin), `hierarchy` (Kingdom→Species), or `both` |
+| Hierarchy root | Optional parent keyword to nest the tree under (e.g. `Wildlife`) |
+| Auto-tag confidence | The operating point (0.30–0.95) above which tags apply automatically — see [Accuracy](#accuracy--honest-numbers-no-regressions) |
+| Needs-review tag | Keyword applied when nothing clears the threshold |
+| Include applied keywords on export | Whether the keywords travel with exported files |
+| Ask for extra keywords each run | Whether to prompt for extra Lens-search keywords |
 
 ## How it works
 
 ```
- photo ─▶ downsized JPEG ─▶ provider ─▶ observations ─▶ parser ─▶ candidates
-                            (Lens|Vision)  (labels+titles)  (sci + common names)
-                                                                     │
+ photo ─▶ downsized JPEG ─▶ Google Lens ─▶ observations ─▶ parser ─▶ candidates
+          (fresh render,     (via your      (AI overview +   (sci + common names)
+           EXIF/GPS stripped) real Chrome)    match titles)          │
    keywords ◀── plan (flat + hierarchy) ◀── ranked taxa ◀── GBIF resolve + score
 ```
 
-1. **Provider** (pluggable): asks Google what's in the image and returns a
-   normalised list of *observations* — Google's own label guesses plus the
-   titles of pages showing the same image.
-2. **Parser** mines two channels from those: scientific binomials (`Genus
-   species`) and cleaned common-name candidates, ranked by how often and how
-   strongly they appear.
-3. **Taxonomy** resolves each candidate against **GBIF** (free, no key): a
-   scientific name is confirmed by exact match; a common name is looked up and
-   normalised to its accepted species, with the full classification chain.
-4. **Scorer** combines the evidence into a confidence per taxon. When a
-   scientific *and* a common candidate independently agree on the same species,
-   confidence jumps — that agreement is the core signal.
-5. **Keywording** writes the result: flat `common` + `Latin` keywords, the full
-   hierarchy, or both (your choice). Confident hits are applied automatically;
-   anything uncertain gets a `species: needs review` tag instead of a guess.
+1. **Google Lens** (`src/shared/ProviderGoogleLens.lua` + the Node helper
+   `scripts/lens`): Lens has no anonymous API and renders results with JavaScript,
+   so a small helper uploads the image, transplants the anonymous session into your
+   installed Chrome, lets it render, and returns the visible match text — Google's
+   own AI-Overview answer plus the titles of pages showing the same image.
+2. **Parser** (`SpeciesParser.lua`) mines two channels: scientific binomials
+   (`Genus species`) and cleaned common-name candidates, ranked by how strongly and
+   how often they appear.
+3. **Taxonomy** (`Taxonomy.lua`) resolves each candidate against **GBIF** (free, no
+   key): a scientific name is confirmed by exact match; a common name is looked up
+   and normalised to its accepted species, with the full classification chain.
+4. **Scorer** (`Identify.lua`) combines the evidence into a confidence per taxon.
+   Lens's AI Overview is treated as the authoritative answer; the noisy visual-match
+   titles only corroborate. See [Accuracy](#accuracy--honest-numbers-no-regressions)
+   for exactly what the number means.
+5. **Keywording** (`Keywords.lua`) writes the result: flat `common` + `Latin`
+   keywords, the full hierarchy, or both.
 
-Multi-subject frames work: every species clearing the threshold is tagged, so a
-reef shot with a fish *and* an octopus gets both.
+The image-recognition step sits behind one small **provider seam**, so the whole
+parser → GBIF → scorer pipeline is pure, unit-tested, and unchanged no matter what
+feeds it.
 
-## Backends
+## Accuracy — honest numbers, no regressions
 
-| Backend | What it is | Cost / setup | Coverage | Notes |
-|---|---|---|---|---|
-| **Google Lens** *(default)* | Drives your installed Chrome (a **visible** window) through a Lens image search and harvests the match text | **Free, no key**; needs **Node.js + Google Chrome** (macOS/Linux) | plants + animals | Closest to the Lens app; best-effort (see below) |
-| **Pl@ntNet** | [Pl@ntNet](https://my.plantnet.org/) identification API | **Free key**, 500/day, no credit card | **plants only** | Rock-solid for flora; clean scientific + common names |
-| **Google Vision (Web Detection)** | [Cloud Vision web detection](https://cloud.google.com/vision/docs/detecting-web) | Needs a **GCP billing account** (card on file; ~1,000 free/mo then paid) | plants + animals | Most reliable, ToS-clean; opt in only if a card is OK |
-
-All three feed the **identical** parser → GBIF → scorer pipeline, so the accuracy
-logic is shared and testable regardless of backend.
-
-> **On the default (Google Lens):** there is no official Lens API, and Lens
-> results are rendered by **JavaScript**, so a plain HTTP client (curl /
-> Lightroom's `LrHttp`) can't read them. The plugin therefore drives a **real
-> browser**: a small Node helper ([scripts/lens](scripts/lens)) uploads the image,
-> transplants the anonymous session into your installed **Google Chrome** (in a
-> **visible window**, so Google's real results page — ads and all — is shown rather
-> than scraped invisibly), lets it render the JS, and returns the match text — no
-> key, no login, no cookie paste. **One-time setup:** `cd scripts/lens && npm i`
-> (and have Chrome).
-> It's **best-effort**: run it from a normal home connection (Google blocks
-> datacenter/VPN IPs); on any failure the photo falls through to *needs review* (it
-> never crashes), and you can switch to Pl@ntNet/Vision. macOS/Linux only for now.
-> Measure the real Lens accuracy on your own photos with `just live-accuracy`.
-
-> **Accuracy reality check:** the offline test corpus is *representative* (it
-> exercises the pipeline deterministically at 100%). On **real** Lens captures,
-> recall/precision are lower — Lens returns many related species per image, so the
-> scorer both misses some (common-name-only animals) and over-tags others. `just
-> live-accuracy` reports the honest numbers; tuning the scorer for real Lens output
-> is an open improvement.
-
-## Requirements
-
-- Adobe Lightroom Classic (built against SDK ≥ 6 APIs).
-- For the backend you pick:
-  - **Google Lens (default):** no key, but needs **Node.js + Google Chrome**
-    installed (macOS/Linux). One-time: `cd scripts/lens && npm i`.
-  - **Pl@ntNet:** a free [Pl@ntNet](https://my.plantnet.org/) API key (no credit card).
-  - **Vision:** a [Google Cloud Vision](https://cloud.google.com/vision) API key
-    (requires a GCP project with billing enabled).
-- No key needed for GBIF (taxonomy) — it's free and anonymous.
-
-## Install
-
-1. Download the latest `SpeciesTagger.lrplugin-*.zip` from
-   [Releases](https://github.com/yoren/lightroom-species-tagger/releases) and unzip.
-2. Lightroom Classic → **File → Plug-in Manager → Add** → select the
-   `SpeciesTagger.lrplugin` folder. (Or drop it into your `Modules` folder:
-   macOS `~/Library/Application Support/Adobe/Lightroom/Modules/`,
-   Windows `%APPDATA%\Adobe\Lightroom\Modules\`.)
-3. In **Plug-in Manager**, open the **Species Tagger** settings and:
-   - pick your **backend** (the default, Google Lens, needs no key; Pl@ntNet and
-     Vision each take their key);
-   - choose your **keyword style** (flat / hierarchy / both) and the
-     **auto-apply threshold**.
-4. Select photos in the Library, then **Library → Plug-in Extras → Identify and
-   Tag Species**.
-
-## Settings
-
-| Setting | What it does |
-|---|---|
-| Backend | `lens` (Google Lens, direct & keyless), `plantnet`, or `vision` |
-| Pl@ntNet / Vision key | Credentials for the chosen keyed backend (stored in Lightroom prefs) |
-| Lens locale | `hl` / `country` passed to the Lens upload |
-| Keywords | `flat` (common + Latin), `hierarchy` (Kingdom→Species), or `both` |
-| Hierarchy root | Optional parent keyword to nest the tree under (e.g. `Wildlife`) |
-| Auto-apply at | Confidence threshold (0.30–0.95) above which tags are applied automatically |
-| Needs-review tag | Keyword applied when nothing clears the threshold |
-
-## Accuracy & testing — no regressions
-
-This is built to be **measurable**, not vibes. The repo ships a labelled
-**fixture corpus** and an offline harness:
+This is built to be **measurable**, not vibes.
 
 ```
 just test        # unit + accuracy specs (busted) — fully offline, no API keys
-just accuracy    # prints the accuracy table (recall / top-1 / genus / family / false+)
+just accuracy    # prints recall / top-1 / genus / family / false+ over the corpus
 ```
 
-Each case in `spec/fixtures/manifest.lua` pairs a recorded provider response
-with ground-truth species. The harness replays it through the real
-parser/scorer/resolver (the GBIF responses are **real captures**; the Lens/Vision
-responses are representative until you record your own), and asserts both
-**recall** (every expected species found) and **precision** (no confident false
-positives). CI runs it on every push, so a change that quietly drops accuracy
-fails the build.
+Each case in `spec/fixtures/manifest.lua` pairs a recorded Lens response with
+ground-truth species and replays it through the **real** parser/scorer/resolver.
+CI runs it on every push, so a change that quietly drops accuracy fails the build.
 
-The seed corpus is built from the maintainer's own Instagram captions
-(`spec/fixtures/groundtruth/yuvalsaw.lua` is the full labelled set). Grow it with
-**real** captures from your own photos:
+**Two honesty notes worth reading:**
 
-```
-lua scripts/record-fixture.lua spec/fixtures/images/yourshot.jpg --provider lens
-# (writes the provider + GBIF fixtures and prints a manifest stub to paste in)
-# Lens needs a residential connection; for plants: PLANTNET_KEY=… --provider plantnet
-```
+- **The bundled Lens fixtures are *representative*, not live captures.** The GBIF
+  responses are real; the `spec/fixtures/lens/*.json` blobs are seeded from the
+  correct names plus realistic noise. So the offline 100% proves the **pipeline**
+  works on Lens-shaped input — it is *not* a measurement of real Lens recall. Measure
+  the real thing on your own photos with `just live-accuracy` (residential network).
+- **The confidence number is a bounded *evidence score*, not a calibrated
+  probability.** A "0.62" doesn't mean "62% correct"; it's a monotonic, transparent
+  score (the exact formula is in `Identify.lua`) used as an operating point. Ground
+  the threshold in *your* data with the calibration sweep:
 
-### Are the bundled Lens fixtures real?
+  ```
+  just live-accuracy -- --sweep    # precision / recall at every threshold
+  ```
 
-**No — by default they are *representative*, not live Google captures.** The GBIF
-fixtures are real, but the `spec/fixtures/lens/*.json` blobs are generated
-(`scripts/build-corpus.lua`'s `lensBlob`) — seeded with the correct species names
-plus noise. So the offline 100% number proves the **parser → GBIF → scorer
-pipeline** works on Lens-shaped input; it is **not** a measurement of real Lens
-recall.
+  Full detail: [docs/SCORING.md](docs/SCORING.md).
 
-To measure the real thing on your own photos (drop originals in
-`spec/fixtures/images/`, then on a **residential** connection):
+## Building from source
+
+Everything is driven by scripts at the repo root (macOS / Linux; on Windows use WSL
+for the dev toolchain — Windows *end users* just download the release):
 
 ```
-cd scripts/lens && npm i        # one-time (puppeteer-core; uses your Chrome)
-just live-accuracy              # runs real Google Lens per image, scores vs ground truth
+./install.sh       # one-shot: toolchain + Lens helper deps + build + symlink into Lightroom
+./dev-setup.sh     # just the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
+./build.sh         # build dist/SpeciesTagger.lrplugin (+ zip + checksums)
+./debug-lens.sh    # troubleshoot a wrong ID in a visible Chrome with debug artifacts
 ```
 
-`live-accuracy` **writes nothing** — it drives your Chrome through a real Lens
-search for each ground-truth image and reports recall / top-1 / genus / family /
-false-positives. The numbers are honestly lower than the representative 100%
-(Lens returns many related species), which is the real signal.
-
-## Building & developing
-
-Scripts at the repo root cover everything — run them directly, no need to dig
-through `scripts/`:
+Or the finer-grained [`just`](https://github.com/casey/just) recipes:
 
 ```
-./dev-setup.sh     # one-time: bootstrap the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
-./install.sh       # full install: toolchain + Lens helper deps + build + symlink into Lightroom
-./build.sh         # build dist/SpeciesTagger.lrplugin (captures Lens corpus once, on first build)
-./capture.sh       # (re)capture real Google Lens output for the ground-truth corpus
-./debug-lens.sh    # troubleshoot a wrong ID: run Lens in a visible Chrome with debug artifacts
+just check         # lint + test + build (run before pushing)
+just lint          # luacheck src spec scripts
+just test          # busted unit + accuracy specs
+just lens-test     # drive the real Lens helper against a fake Google (needs Chrome)
+just build         # compose the bundle, version-stamp, zip + checksums
+just install       # build + symlink into the local Lightroom Modules folder
 ```
 
-`./dev-setup.sh` builds an isolated, pinned Lua 5.1 + LuaRocks toolchain via
-[hererocks](https://github.com/luarocks/hererocks) (matching CI and the Lightroom
-runtime). `./install.sh` is the one command for a fresh machine — it runs
-`./dev-setup.sh` if needed, installs the Lens helper's Node deps, builds, and
-symlinks the bundle into your Lightroom Modules folder. Pass `--uninstall` to
-remove the symlink.
+There is no build step to memorise and **no AI in the loop**: `just check` is the
+whole gate, and it's exactly what CI runs.
 
-The first `./build.sh` (or `./install.sh`) also captures real Google Lens output
-for the ground-truth corpus so accuracy work has live data to replay offline;
-that step needs Chrome + a residential network and is best-effort — skip it with
-`SKIP_CAPTURE=1`, or run `./capture.sh` yourself any time.
+## Repository layout — authored vs. generated
 
-Finer-grained commands via [`just`](https://github.com/casey/just) (optional sugar
-over `build/build.lua`; `just build` is the plain, no-capture build):
+*(Answering the reasonable question "is all that code in `node_modules` / `.deps`
+ours?" — no. Here's every tree and who wrote it.)*
+
+**Authored (this is the project):**
 
 ```
-just lint        # luacheck src spec scripts
-just test        # busted unit + accuracy specs
-just accuracy    # accuracy report over the offline fixture corpus
-just capture     # = ./capture.sh
-just build       # compose dist/SpeciesTagger.lrplugin, version-stamp, zip + checksums
-just install     # build + symlink into the local Lightroom Modules folder
-just check       # lint + test + build (run before pushing)
+src/shared/                 pure, testable modules (parser, taxonomy, scorer, keywords, provider)
+src/SpeciesTagger.lrplugin/ the Lightroom glue (menus, settings, catalog writes)
+scripts/lens/               the Google Lens browser helper (lens-search.js, overlay-inject.js, tests)
+scripts/*.lua               dev tooling (accuracy, corpus builders, live-accuracy, record-fixture)
+spec/                       unit specs + the accuracy harness + the labelled fixture corpus
+build/build.lua             composes/stamps/zips the bundle
+docs/, *.sh, justfile       docs + entry-point scripts
 ```
 
-### Troubleshooting a wrong identification
+**Generated or third-party — never committed, all reproducible, all git-ignored:**
 
-When Lens tags something obviously wrong, watch the actual exchange with a visible
-Chrome window. From **inside Lightroom**, select the photo and run **Library >
-Plug-in Extras > "Debug Lens on Selected Photo (headed)…"**: it runs the same
-upload Lightroom would, opens Chrome so you can watch, reveals the artifacts folder
-(`~/Desktop/SpeciesTagger-debug/<photo>-<time>/`) in Finder, and shows what Lens
-returned and how it would be scored.
+Everything the build *produces* lives under one top-level **`output/`** tree, removed
+by **`just clean`**:
 
-From a **terminal** (same thing, against an exported JPEG):
+| Tree | What it is | Ours? | How it appears |
+|---|---|---|---|
+| `output/dist/` | The built `.lrplugin` bundle + zips | generated | `./build.sh` |
+| `output/deps/` | The one Lua runtime dep (`dkjson`) | third-party | pulled by LuaRocks at build |
 
-```
-./debug-lens.sh /path/to/photo.jpg                    # or add "City, State" / lat lng
-```
+Two dependency trees can't live under `output/` (their tools require a fixed
+location) — `just clean-all` removes them too:
 
-Either way it opens Chrome on the real Lens results page and writes artifacts
-(terminal default `/tmp/lens-debug/`, override with `LENS_DEBUG_DIR`):
+| Tree | What it is | Ours? | Why it's separate |
+|---|---|---|---|
+| `scripts/lens/node_modules/` | `puppeteer-core` (pure JS) | third-party | Node resolves modules next to `package.json` |
+| `.lua-env/` | Pinned Lua 5.1 + LuaRocks toolchain | third-party | your installed dev env, not build output |
 
-| artifact | what it tells you |
-| --- | --- |
-| `uploaded.jpg` | the exact image sent to Lens — confirm it's the right, non-blank photo |
-| `page.png` / `page.html` | the rendered results page — is the right subject in the *Visual matches* grid? |
-| `results-url.txt` | open this in your **own logged-in Chrome** to compare against the helper's render |
-| `strings-sources.json` | every scraped string, the page region it came from, and whether it was excluded as noise |
-| `result.json` | the final `{ overview, strings }` handed to the scorer (was the *AI Overview* empty?) |
-
-`strings-sources.json` is the decisive one: if a bogus name shows up with a region
-like *Related searches* / *People also search for* and `excluded: true`, the scrape
-correctly dropped it. The helper now excludes those noise sections so stray
-binomials (e.g. a "Related searches" chip) can no longer become a tag. Debug mode
-is env-gated (`LENS_HEADED` / `LENS_DEBUG`); normal plugin runs are unaffected.
-
-### When Google challenges the session
-
-Google sometimes flags the anonymous upload with a CAPTCHA / "unusual traffic" /
-consent wall, so the page has no real results to parse. The helper always works in
-a **visible Chrome window**, so you see the challenge when it appears. For a
-**single-photo** selection it's interactive: a **"Parse results" / "Cancel"** control
-bar appears so you can complete the check, then it auto-detects the real results (or
-you click **"Parse results"**; **"Cancel"** / a 3-minute timeout aborts and the photo
-is marked *skipped*). A **multi-photo batch** is hands-off: on a challenge it stops
-the run (each further request only deepens the block) and tells you how to proceed —
-wait, switch network, run a single photo, or use Pl@ntNet / Vision. Tunable via
-`LENS_INTERACTIVE` / `LENS_INTERACTIVE_TIMEOUT` in the helper.
-
-The biggest factor in *whether* you get challenged is the **network/IP** you run
-from (Google gates the Lens endpoint hard on flagged or shared/CGNAT IPs), not the
-software — a clean residential IP is far less likely to be challenged. The helper
-also throttles batch requests and reuses a warm browser profile to avoid tripping
-the "too many requests too fast" heuristic.
-
-This whole flow has an automated integration test that fakes a local "Google"
-(challenge page + results page) — no network — and drives the real helper (in a
-headless test mode that never touches Google) through every branch (confident,
-challenge→auto-detect, cancel/timeout, the Parse button, non-interactive):
-
-```
-just lens-test        # = node scripts/lens/test/integration.test.js (needs Chrome)
-```
-
-To raise its fidelity with a **real** captured page, run the debug mode above and
-copy the saved `page.html` (results) / `page-challenge.html` (the challenge) into
-`scripts/lens/test/fixtures/`; the test server will serve them.
-
-### Layout
-
-```
-src/shared/        pure, testable modules (parser, taxonomy, scorer, keywords, providers)
-src/SpeciesTagger.lrplugin/  the Lightroom glue (menu, settings, catalog writes)
-spec/              unit specs + the accuracy harness + fixture corpus
-build/build.lua    composes/stamps/zips the bundle; pulls the one runtime dep (dkjson)
-*.sh (repo root)   entry points: dev-setup, install, build, capture, debug-lens
-scripts/           internal tooling (Lens browser helper, accuracy + corpus builders)
-```
-
-The only third-party **runtime** dependency is **dkjson** (JSON), pinned in
-`build/build.lua`, pulled at build time and bundled into the `.lrplugin` (never
-committed). Taxonomy uses GBIF over `LrHttp`; there's no SDK to vendor.
+The only third-party **runtime** code that ships inside the `.lrplugin` is `dkjson`
+(JSON) and `puppeteer-core` (drives your Chrome). Taxonomy uses GBIF over `LrHttp`;
+there's no SDK to vendor.
 
 ## Privacy
 
-A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS) is sent to the
-chosen backend: Google (Lens or Vision) or Pl@ntNet. No third-party image host is
-involved on any path. Taxonomy lookups send only **names** to GBIF. Full detail in
-[docs/PRIVACY.md](docs/PRIVACY.md).
+A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS) is uploaded to
+Google Lens. No third-party image host is involved. Taxonomy lookups send only
+**names** to GBIF. Full detail in [docs/PRIVACY.md](docs/PRIVACY.md).
 
 ## Limitations
 
-- Identifies to **species** (sometimes genus); subspecies and ambiguous
-  look-alikes may land in “needs review”. Treat it as a fast first pass, not a
-  taxonomist.
-- Accuracy is only as good as the image-search signal — clear, well-framed
-  subjects do best.
-- The bundled Lens/Vision fixtures are representative; record real ones for a
-  true accuracy read on your own library.
+- Identifies to **species** (sometimes genus); subspecies and ambiguous look-alikes
+  may land in *needs review*. It's a fast first pass, not a taxonomist.
+- Accuracy is only as good as the image-search signal — clear, well-framed subjects
+  do best, and real Lens returns many related species per image.
+- The Lens backend is **best-effort and unofficial** (it automates a consumer Google
+  surface). Keep batches modest; run from a residential network.
+
+## Contributing
+
+See [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up in one command, the test/lint
+gate, the architecture, and how to grow the corpus. Issues and PRs welcome.
 
 ## License
 

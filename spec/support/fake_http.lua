@@ -5,7 +5,8 @@ Routes GBIF /species/match, /species/search and /vernacularNames to fixture file
 keyed by a slug of the query name; unmapped names get the "GBIF didn't recognise
 it" answers (matchType NONE / empty results) — which is exactly how a junk
 candidate should behave. This is what makes the accuracy suite deterministic and
-offline.
+offline. Only `get` is needed: the Lens provider parses recorded helper output
+(no http), and GBIF is GET-only.
 ------------------------------------------------------------------------------]]
 
 local fixtures = require 'support.fixtures'
@@ -30,9 +31,8 @@ local function param( url, key )
 end
 M.param = param
 
--- new( [opts] ) -> http adapter. opts.uploadUrl overrides the multipart return.
-function M.new( opts )
-	opts = opts or {}
+-- new() -> http adapter serving recorded GBIF JSON over `get`.
+function M.new()
 	return {
 		get = function( url )
 			if url:find( '/species/match', 1, true ) then
@@ -48,8 +48,6 @@ function M.new( opts )
 			end
 			return nil
 		end,
-		post = function() return nil end,
-		postMultipart = function() return opts.uploadUrl or 'https://files.example/fixture.jpg' end,
 	}
 end
 
