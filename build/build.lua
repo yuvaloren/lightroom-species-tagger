@@ -225,6 +225,18 @@ local function modules_dir()
 	return home .. '/Library/Application Support/Adobe/Lightroom/Modules'
 end
 
+-- Remove whatever is already at `path`: a symlink (possibly DANGLING — e.g. a prior
+-- install that pointed at the old dist/ location), a file, or a real directory.
+-- lfs.attributes follows symlinks, so a dangling link reads as absent and would be
+-- left in place (then lfs.link fails "File exists"); symlinkattributes inspects the
+-- link itself, which is what we need. Returns true if the path is now clear.
+local function remove_existing( path )
+	local mode = lfs.symlinkattributes( path, 'mode' )
+	if mode == nil then return true end
+	if mode == 'directory' then rmtree( path ) else os.remove( path ) end
+	return lfs.symlinkattributes( path, 'mode' ) == nil
+end
+
 local function do_install()
 	local mods = modules_dir()
 	mkdirp( mods )
@@ -234,8 +246,9 @@ local function do_install()
 		if not exists( target ) then
 			die( 'nothing to install: ' .. target .. ' (run a build first)' )
 		end
-		if lfs.attributes( link, 'mode' ) ~= nil then
-			os.remove( link )
+		-- clear any prior install (incl. a stale/dangling symlink) before re-linking
+		if not remove_existing( link ) then
+			die( 'could not replace existing ' .. link .. ' — remove it by hand and retry' )
 		end
 		local ok, err = lfs.link( target, link, true ) -- symbolic
 		if not ok then
@@ -253,8 +266,8 @@ local function do_uninstall()
 	local mods = modules_dir()
 	for _, plugin in ipairs( PLUGINS ) do
 		local link = mods .. '/' .. plugin .. '.lrplugin'
-		if lfs.attributes( link, 'mode' ) ~= nil then
-			os.remove( link )
+		if lfs.symlinkattributes( link, 'mode' ) ~= nil then
+			remove_existing( link )
 			log( 'removed ' .. link )
 		end
 	end
