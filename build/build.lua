@@ -330,8 +330,9 @@ local function compose( label )
 		local lensSrc = ROOT .. '/scripts/lens'
 		if exists( lensSrc .. '/lens-search.js' ) then
 			if not exists( lensSrc .. '/node_modules' ) then
-				log( 'WARNING: scripts/lens/node_modules missing — run `cd scripts/lens && npm i` ' ..
-					'so the Google Lens backend works in the bundle' )
+				die( 'scripts/lens/node_modules is missing — the bundle must be self-contained ' ..
+					'(the Lens helper ships with its deps, nothing for users to npm install). ' ..
+					'Run `cd scripts/lens && npm ci`, then rebuild.' )
 			end
 			run( string.format( 'cp -R %q %q', lensSrc, outdir .. '/lens' ) )
 			log( 'bundled Google Lens helper -> ' .. outdir .. '/lens' )
