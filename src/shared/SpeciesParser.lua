@@ -42,6 +42,18 @@ M.GENUS_STOPWORDS = toSet {
 	'Close', 'Side', 'Front', 'Two', 'Three', 'Spotted', 'Spiny', 'Long', 'Short',
 }
 
+-- English function words that are never Latin species epithets. Checked on the
+-- SECOND (species) token only, so no genuine epithet can be filtered. This kills
+-- the pseudo-binomials the "Genus species" regex mines out of range prose, e.g.
+-- "native to India and Sri Lanka" -> "India and" / "Lanka and" (epithet "and"),
+-- "found in Mexico and…" -> "Mexico and" — GBIF then resolves the leading token to
+-- a real GENUS and the junk would auto-apply. (Short words like 'is'/'or' are
+-- already rejected by the >=3-char rule.)
+M.EPITHET_STOPWORDS = toSet {
+	'and', 'are', 'the', 'this', 'these', 'that', 'was', 'were', 'from', 'with',
+	'its', 'has', 'have', 'their', 'they', 'which', 'when', 'where', 'near', 'such', 'also',
+}
+
 -- Site / boilerplate tokens stripped from page titles before they become
 -- common-name candidates (compared case-insensitively, as whole segments).
 M.TITLE_NOISE = toSet {
@@ -88,6 +100,7 @@ local function isBinomialTokens( genus, species )
 	if M.GENUS_STOPWORDS[ genus:lower() ] then return false end
 	if #genus < 3 then return false end
 	if #species < 3 then return false end
+	if M.EPITHET_STOPWORDS[ species:lower() ] then return false end
 	return true
 end
 

@@ -65,9 +65,19 @@ end
 local function normalizeMatch( d )
 	if type( d ) ~= 'table' then return nil end
 	if not d.usageKey or d.matchType == 'NONE' or not d.matchType then return nil end
+	-- Follow GBIF synonymy to the ACCEPTED taxon, so a synonym candidate and its
+	-- accepted-name sibling aggregate under one key in Identify (instead of the
+	-- synonym winning top-1 as a duplicate false positive). GBIF gives the accepted
+	-- binomial in d.species and the accepted key in d.acceptedUsageKey.
+	local usageKey = d.usageKey
+	local sciName = d.canonicalName or d.species or d.scientificName
+	if d.status == 'SYNONYM' and d.acceptedUsageKey then
+		usageKey = d.acceptedUsageKey
+		sciName = d.species or sciName
+	end
 	return {
-		usageKey = d.usageKey,
-		scientificName = d.canonicalName or d.species or d.scientificName,
+		usageKey = usageKey,
+		scientificName = sciName,
 		rank = d.rank,
 		matchType = d.matchType,
 		confidence = d.confidence or 0,

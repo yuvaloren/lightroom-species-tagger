@@ -91,7 +91,18 @@ function M.parse( decoded )
 	if overview and overview ~= '' then
 		-- Google's AI Overview is its single authoritative answer; mark it so the
 		-- scorer trusts it over the noisy (often binomial-bearing) match titles.
-		obs[ #obs + 1 ] = { text = overview, kind = 'label', weight = 2.0, source = 'lens:ai', authoritative = true }
+		-- BUT Google appends a citation-chip row ("<Site> +N M sites" + scraped
+		-- source-page titles) after the AI prose. A binomial living only in that tail
+		-- is NOT Lens's answer, so it must not inherit authoritative weight. Keep the
+		-- prose authoritative; demote the tail to a low-weight, non-authoritative title
+		-- (a tail name that also recurs in strings[] can still corroborate at low weight).
+		local cut = overview:find( '%+?%d+%s+%d+%s+sites?' ) or overview:find( '%d+%s+sites?' )
+		local prose = cut and overview:sub( 1, cut - 1 ) or overview
+		local tail = cut and overview:sub( cut ) or nil
+		obs[ #obs + 1 ] = { text = prose, kind = 'label', weight = 2.0, source = 'lens:ai', authoritative = true }
+		if tail and tail ~= '' then
+			obs[ #obs + 1 ] = { text = tail, kind = 'title', weight = 0.35, source = 'lens:ai-tail' }
+		end
 	end
 	local MAX = 40 -- bound the candidate count (each may become a GBIF lookup downstream)
 	for i, text in ipairs( harvest( list ) ) do

@@ -78,10 +78,30 @@ end
 function M.confidentAt( a, threshold, cfg, hasAuthoritative )
 	cfg = cfg or M.DEFAULTS
 	local trusted = ( not hasAuthoritative ) or a.authoritative
+	-- Only a species/subspecies auto-applies. A genus-rank match is either a real
+	-- genus-only answer (better left for review) or a fabricated pseudo-binomial the
+	-- resolver collapsed to its genus ("Mexico and" -> genus Mexico); never auto-tag it.
+	local rank = a.taxon and a.taxon.rank
 	return a.confidence >= threshold
 		and a.finalSupport >= ( cfg.minSupport or M.DEFAULTS.minSupport )
 		and ( a.sci or a.hits >= ( cfg.commonOnlyHits or M.DEFAULTS.commonOnlyHits ) )
+		and ( rank == 'SPECIES' or rank == 'SUBSPECIES' )
 		and trusted
+end
+
+-- True when the AI Overview commits only to a GENUS ("genus X" / "X genus") and no
+-- authoritative species resolved. In that case a binomial that appears only in the
+-- visual-match titles is a lookalike congener, not Lens's answer, so it must not
+-- auto-apply (Fix 4). Read-only over the observations.
+local function overviewStatesGenusOnly( observations, hasAuthoritative )
+	if hasAuthoritative then return false end
+	for _, o in ipairs( observations or {} ) do
+		if o.authoritative and type( o.text ) == 'string'
+			and ( o.text:find( '[Gg]enus%s+%u%l+' ) or o.text:find( '%u%l+%s+genus' ) ) then
+			return true
+		end
+	end
+	return false
 end
 
 -- run( observations, deps, cfg ) -> result
@@ -149,9 +169,13 @@ function M.run( observations, deps, cfg )
 	local hasAuthoritative = false
 	for _, a in ipairs( results ) do if a.authoritative then hasAuthoritative = true; break end end
 
+	local genusOnly = overviewStatesGenusOnly( observations, hasAuthoritative )
 	local confident = {}
 	for _, a in ipairs( results ) do
 		a.confident = M.confidentAt( a, cfg.autoApplyThreshold, cfg, hasAuthoritative )
+		-- Genus-only overview: keep title-borne lookalike binomials out of auto-apply
+		-- (they still appear in `results` for review). Downgrade, don't delete.
+		if a.confident and genusOnly and not a.authoritative then a.confident = false end
 		if a.confident then confident[ #confident + 1 ] = a end
 	end
 
