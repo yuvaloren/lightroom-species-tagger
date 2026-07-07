@@ -16,10 +16,10 @@ Options:
   --version=X.Y.Z[-pre]  Version label to stamp + name artifacts. Default:
                          resolved from $GITHUB_REF_NAME (when it looks like a
                          tag) else the repo-root VERSION file.
-  --install              After building, symlink the bundle into the local
-                         Lightroom Modules folder (build once, then Reload in
-                         Plug-in Manager).
-  --uninstall            Remove that symlink and exit.
+  --install              After building, copy a full standalone bundle into a
+                         Lightroom Plugins folder (~/Documents/Lightroom Plugins,
+                         or $LR_PLUGIN_DIR) to Add/Reload in Plug-in Manager.
+  --uninstall            Remove that installed copy and exit.
   --fetch-deps           Ensure the pinned dkjson is cached, then stop (used
                          before running the test suite).
   --no-zip               Compose the bundle only; skip zip + checksums.
@@ -213,16 +213,34 @@ local function parse_numeric( label )
 end
 
 --------------------------------------------------------------------------------
--- install / uninstall into the Lightroom Modules folder
+-- install / uninstall: copy a FULL plugin bundle into a stable, user-managed folder
+-- that Lightroom's Plug-in Manager can Add + Reload + Remove. (Deliberately NOT the
+-- auto-load Modules folder, whose plugins can't be removed from Plug-in Manager.)
+-- Override the location with LR_PLUGIN_DIR.
 
-local function modules_dir()
-	local is_windows = package.config:sub( 1, 1 ) == '\\'
-	if is_windows then
-		local appdata = os.getenv( 'APPDATA' ) or ''
-		return appdata .. '\\Adobe\\Lightroom\\Modules'
+local function install_dir()
+	local env = os.getenv( 'LR_PLUGIN_DIR' )
+	if env and env ~= '' then return env end
+	if package.config:sub( 1, 1 ) == '\\' then
+		return ( os.getenv( 'USERPROFILE' ) or '' ) .. '\\Documents\\Lightroom Plugins'
 	end
-	local home = os.getenv( 'HOME' ) or ''
-	return home .. '/Library/Application Support/Adobe/Lightroom/Modules'
+	return ( os.getenv( 'HOME' ) or '' ) .. '/Documents/Lightroom Plugins'
+end
+
+-- Recursively copy a directory tree (binary-safe via copy_file). Used to install a
+-- full standalone copy of the built .lrplugin — no symlink back into the repo.
+local function copytree( src, dst )
+	local mode = lfs.attributes( src, 'mode' )
+	if mode == 'directory' then
+		mkdirp( dst )
+		for entry in lfs.dir( src ) do
+			if entry ~= '.' and entry ~= '..' then
+				copytree( src .. '/' .. entry, dst .. '/' .. entry )
+			end
+		end
+	elseif mode == 'file' then
+		copy_file( src, dst )
+	end
 end
 
 -- Remove whatever is already at `path`: a symlink (possibly DANGLING — e.g. a prior
@@ -238,37 +256,40 @@ local function remove_existing( path )
 end
 
 local function do_install()
-	local mods = modules_dir()
-	mkdirp( mods )
+	local dir = install_dir()
+	mkdirp( dir )
+	local installed = {}
 	for _, plugin in ipairs( PLUGINS ) do
 		local target = DIST .. '/' .. plugin .. '.lrplugin'
-		local link = mods .. '/' .. plugin .. '.lrplugin'
+		local dest = dir .. '/' .. plugin .. '.lrplugin'
 		if not exists( target ) then
 			die( 'nothing to install: ' .. target .. ' (run a build first)' )
 		end
-		-- clear any prior install (incl. a stale/dangling symlink) before re-linking
-		if not remove_existing( link ) then
-			die( 'could not replace existing ' .. link .. ' — remove it by hand and retry' )
+		-- clear any prior install (a real copy, or a stale symlink from older installs)
+		if not remove_existing( dest ) then
+			die( 'could not replace existing ' .. dest .. ' — remove it by hand and retry' )
 		end
-		local ok, err = lfs.link( target, link, true ) -- symbolic
-		if not ok then
-			die( 'could not symlink ' .. link .. ': ' .. tostring( err ) )
-		end
-		log( 'installed (symlink) ' .. link .. ' -> ' .. target )
+		copytree( target, dest ) -- a full standalone copy — no symlink back into the repo
+		installed[ #installed + 1 ] = dest
+		log( 'installed (copy) ' .. dest )
 	end
 	log( '' )
-	log( 'In Lightroom Classic: Plug-in Manager will pick this up on next launch,' )
-	log( 'or use "Reload" after a rebuild. NOTE: editing a src/shared/ module needs a' )
-	log( 'rebuild (lua build/build.lua) before Reload — the bundle holds a copy.' )
+	log( 'In Lightroom Classic — File \226\150\184 Plug-in Manager:' )
+	log( '  \226\128\162 First time:  click "Add" and select the folder' )
+	for _, p in ipairs( installed ) do log( '        ' .. p ) end
+	log( '  \226\128\162 After re-running ./install.sh to update: select "Species Tagger"' )
+	log( '        and click "Reload Plug-in" (or just relaunch Lightroom Classic).' )
+	log( '' )
+	log( 'Then run it from  Library \226\150\184 Plug-in Extras \226\150\184 Identify and Tag Species.' )
 end
 
 local function do_uninstall()
-	local mods = modules_dir()
+	local dir = install_dir()
 	for _, plugin in ipairs( PLUGINS ) do
-		local link = mods .. '/' .. plugin .. '.lrplugin'
-		if lfs.symlinkattributes( link, 'mode' ) ~= nil then
-			remove_existing( link )
-			log( 'removed ' .. link )
+		local dest = dir .. '/' .. plugin .. '.lrplugin'
+		if lfs.symlinkattributes( dest, 'mode' ) ~= nil then
+			remove_existing( dest )
+			log( 'removed ' .. dest .. ' (also remove it from Plug-in Manager if it was Added)' )
 		end
 	end
 end
