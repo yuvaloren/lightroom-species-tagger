@@ -8,39 +8,23 @@ All notable changes to this project are documented here. The format is based on
 
 ### Added
 
-- Initial release. A Lightroom Classic plugin that identifies the plants and animals
-  in selected photos and tags them with both the **common** and the **Latin
-  (scientific)** name.
-- **Google Lens recognition — free, no API key.** Lens has no anonymous API and
-  renders results with JavaScript, so a bundled Node helper (`scripts/lens`) uploads
-  the image, transplants an anonymous session into the user's installed Google Chrome
-  (a visible window — Google's real page is shown, not scraped invisibly), and
-  harvests the AI-Overview answer plus visual-match titles. Best-effort: a photo goes
-  to *needs review* on any failure; a Google "are you human" check can be solved in
-  the window on a single-photo run.
-- **Keyless taxonomy** via the **GBIF** backbone: accepted scientific name, preferred
-  common name, and the full Kingdom→Species classification for optional hierarchy
-  keywords. An image-surfaced common name is preferred over GBIF's arbitrary first
-  vernacular.
-- **Confidence-scored, auto-apply-if-confident** tagging; uncertain photos get a
-  `species: needs review` keyword instead of a guess. Multi-subject frames tag every
-  species over threshold.
-- **Add context to the search:** an optional per-run **extra keywords** prompt and the
-  photo's **location** (GPS or IPTC place) are folded into the Lens search as a
-  multisearch text refinement, and location is also used as browser geolocation.
-- **Re-parse to correct results:** with "Keep the browser open" on, each photo's tab
-  is stamped with the photo it belongs to; refine the wrong ones, then run **Plug-in
-  Extras ▸ Re-tag from open Lens tabs** once to sweep every open Lens tab (no
-  new upload) and re-tag each tab's own photo in a single batch.
-- **First-run welcome** listing every setting and where to find it.
-- **Cross-platform:** macOS, Linux, and Windows (Chrome discovery, process handling,
-  and command building are platform-aware).
-- **Offline, deterministic accuracy + regression harness:** a labelled, impersonal
-  fixture corpus spanning several phyla, `scripts/accuracy.lua` reporting
-  recall / top-1 / genus / family / false+, and a **threshold calibration sweep**
-  (`live-accuracy --sweep`) that reports precision/recall at every auto-apply
-  threshold so the operating point can be grounded in real data. See
-  [docs/SCORING.md](docs/SCORING.md).
+- Initial release. A Lightroom Classic plugin that tags the plants and animals in your
+  photos with both the **common** and the **Latin (scientific)** name — assisted by
+  Google Lens, decided by you.
+- **Assistive Google Lens — free, no API key, no scraping.** A bundled Node helper
+  (`scripts/lens`) uploads the image the way the Lens website does and opens the results
+  in your installed Google Chrome (a **visible** window). You read Google's real page,
+  **highlight** the species name, and press **Tag** in a bottom bar; the plugin uses only
+  that selection (`window.getSelection()`) and never reads the page. This keeps it within
+  Google's terms — no automated access to, or extraction of, Google's results.
+- **Keyless taxonomy** via the **GBIF** backbone: whatever you highlight (a common name or
+  a binomial) is resolved to the accepted scientific name, a preferred common name, and
+  the full Kingdom→Species classification for optional hierarchy keywords.
+- **Multi-photo flow:** one Chrome window is reused across photos (a fresh tab each) with a
+  "Photo m of n" counter and a **Skip** button; the window is closed cleanly at the end.
+- **First-run welcome** explaining the flow.
+- **Cross-platform:** macOS, Linux, and Windows (Chrome/Node discovery and process
+  handling are platform-aware).
 - **Self-contained releases:** CI bundles the Lens helper's dependencies into the
-  `.lrplugin`, so end users unzip and run with no `npm install`. A separate CI job
-  drives the real Lens helper against a local fake Google.
+  `.lrplugin`, so end users unzip and run with no `npm install`. A separate CI job drives
+  the real Lens helper against a local fake Google.

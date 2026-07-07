@@ -1,41 +1,45 @@
 # Lightroom Species Tagger
 
-Identify the **plants and animals** in your photos and tag them with both the
-**common name** and the **Latin (scientific) name** — straight from the Library
-module in **Adobe Lightroom Classic**.
+[![CI](https://github.com/yoren/lightroom-species-tagger/actions/workflows/ci.yml/badge.svg)](https://github.com/yoren/lightroom-species-tagger/actions/workflows/ci.yml)
 
-It asks **Google Lens** what's in the photo — no paid API, no key — then resolves
-every name through the [GBIF](https://www.gbif.org/) taxonomic backbone so the
-keywords you get are canonical and consistent — `Octopus cyanea` + `Day octopus`,
-not whatever a random web page happened to call it. Optionally it writes the full
-taxonomic hierarchy (Kingdom → … → Species) as nested keywords too.
+Tag the **plants and animals** in your photos with both the **common name** and the
+**Latin (scientific) name** — straight from the Library module in **Adobe Lightroom
+Classic**.
 
-> **Why Google Lens, not a vision LLM?** For species specifically, Google's
-> reverse-image-search signal was consistently more accurate in testing than
-> general multimodal models. This plugin leans on that signal and adds a real
-> taxonomy resolver plus a transparent, tunable confidence model on top — with a
-> built-in accuracy harness so quality is measurable and regressions are caught.
+For each selected photo it opens **Google Lens** in a visible Chrome window — no paid
+API, no key. **You** read Google's real results and **highlight** the species name;
+press **Tag**, and the plugin resolves your pick through the
+[GBIF](https://www.gbif.org/) taxonomic backbone and writes canonical, consistent
+keywords — `Octopus cyanea` + `Day octopus`, not whatever a random page called it.
+Optionally it writes the full taxonomic hierarchy (Kingdom → … → Species) as nested
+keywords too.
+
+> **Assistive by design.** The plugin doesn't read Google's results for you — you do,
+> and it uses only the name you highlight. That keeps it firmly within Google's terms
+> (no scraping, no automated extraction) and puts you in control of the identification;
+> the name you pick is then canonicalized through a real GBIF taxonomy resolver.
 
 - [What it does](#what-it-does)
 - [Install (from a release)](#install-from-a-release)
 - [Using it](#using-it)
 - [Settings](#settings)
 - [How it works](#how-it-works)
-- [Accuracy — honest numbers, no regressions](#accuracy--honest-numbers-no-regressions)
 - [Building from source](#building-from-source)
 - [Repository layout — authored vs. generated](#repository-layout--authored-vs-generated)
 - [Privacy](#privacy) · [Limitations](#limitations) · [Contributing](#contributing) · [License](#license)
 
 ## What it does
 
-- **One command** tags every selected photo with its species (common + Latin name).
-- **Multi-subject frames work:** every species that clears the confidence threshold
-  is tagged, so a reef shot with a fish *and* an octopus gets both.
-- **Uncertain?** The photo gets a `species: needs review` keyword instead of a guess.
-- **Adds context to the search:** it can fold the photo's **location** and any
-  **extra keywords you type** into the Lens search (see [Using it](#using-it)).
-- **Correct a wrong result** without re-shooting: refine the search in the browser
-  tab it left open and **re-parse** it to re-tag the photo.
+- **You highlight, it tags.** For each photo it opens Google Lens; you read the
+  results, **highlight** the species name and press **Tag** — it writes the common +
+  Latin keywords to that photo.
+- **Canonical names, always.** Whatever you highlight (a common name or a binomial) is
+  resolved through **GBIF** to the accepted scientific name, preferred common name, and
+  (optionally) the full Kingdom → Species hierarchy.
+- **Refine in Google's own box.** Add keywords or crop in Lens's search box to sharpen
+  the results before you pick (see [Using it](#using-it)).
+- **One window, m-of-n.** Multi-photo runs reuse a single Chrome window with a "Photo 2
+  of 5" counter; **Skip** leaves a photo untouched.
 - **Cross-platform:** macOS, Linux, and Windows.
 
 ## Install (from a release)
@@ -55,33 +59,28 @@ search). Then:
    Tag Species**.
 
 > Google gates the Lens endpoint on the **network you run from** — use a normal home
-> (residential) connection; datacenter/VPN/shared IPs get challenged or blocked. On
-> any failure a photo simply falls through to *needs review* — it never crashes or
-> mis-tags.
+> (residential) connection; datacenter/VPN/shared IPs get challenged. If a check
+> appears, solve it in the window and carry on; a photo you don't tag is just left
+> untouched.
 
 ## Using it
 
 Select one or more photos and run **Library ▸ Plug-in Extras ▸ Identify and Tag
-Species**. A Chrome window opens showing Google's real results page (never a hidden
-scrape); if Google shows an "are you human" check on a single-photo run, a bar lets
-you solve it and continue.
+Species**. For each photo a Chrome window opens showing Google's real results page,
+with a small **Species Tagger** bar across the bottom. Then:
 
-Each run can add text to the image search so Lens weighs picture **and** words:
+1. **Read the results.** Refine them in **Google's own search box** if you like (add
+   words like `juvenile` or `reef`, crop, pick a different match).
+2. **Highlight the species' Latin name** on the page (a common name works too — GBIF
+   resolves either).
+3. **Press Tag** in the Species Tagger bar at the **bottom** of the window. The plugin
+   resolves your selection through GBIF and writes the common + Latin keywords to that
+   photo.
 
-- **Extra keywords** — you're prompted at the start of each run (toggle this off in
-  settings). Type things like `juvenile`, `reef`, or a place; leave blank for a
-  plain image search.
-- **Location** — if the photo has GPS or IPTC place fields, the location is used as
-  browser geolocation *and* added to the search text as `in <place>` (e.g.
-  `in Monterey, California`), so Lens reads it as *where the photo was taken* — a
-  locality hint that favours species occurring there — rather than as the subject.
-
-**Correcting results (re-parse).** Turn on **Keep the browser open** in settings.
-Now each photo's results stay in its own tab. Fix as many as you like — refine the
-search in any tab(s) (Lens lets you add words, crop, or pick a different match) —
-then in Lightroom run **Plug-in Extras ▸ Re-tag from open Lens tabs** once. It
-sweeps **every** open Lens tab, re-tags each tab's own photo from your corrected
-search (no new upload, no marking, no per-photo selection), and reports what changed.
+If Google shows an "are you human" check, solve it yourself in the window, then
+highlight and Tag as usual. Nothing on the page is read by the plugin except the text
+you highlight — so if you pick the wrong thing, just highlight the right name and Tag
+again. Press **Skip** to leave a photo untagged.
 
 ## Settings
 
@@ -89,76 +88,37 @@ Open **Plug-in Manager ▸ Species Tagger**.
 
 | Setting | What it does |
 |---|---|
-| Keep the browser open | Reuse one Chrome window (a tab per photo) so you can refine + re-parse a search |
-| node path | Set only if Lightroom can't auto-find Node (its GUI gets a minimal PATH) — e.g. `/opt/homebrew/bin/node` or `C:\Program Files\nodejs\node.exe` |
 | Keywords | `flat` (common + Latin), `hierarchy` (Kingdom→Species), or `both` |
-| Hierarchy root | Optional parent keyword to nest the tree under (e.g. `Wildlife`) |
-| Auto-tag confidence | The operating point (0.30–0.95) above which tags apply automatically — see [Accuracy](#accuracy--honest-numbers-no-regressions) |
-| Needs-review tag | Keyword applied when nothing clears the threshold |
+| Keyword root | Optional parent keyword to nest the keywords under (e.g. `Wildlife`) |
 | Include applied keywords on export | Whether the keywords travel with exported files |
-| Ask for extra keywords each run | Whether to prompt for extra Lens-search keywords |
 
 ## How it works
 
 ```
- photo ─▶ downsized JPEG ─▶ Google Lens ─▶ observations ─▶ parser ─▶ candidates
-          (fresh render,     (via your      (AI overview +   (sci + common names)
-           EXIF/GPS stripped) real Chrome)    match titles)          │
-   keywords ◀── plan (flat + hierarchy) ◀── ranked taxa ◀── GBIF resolve + score
+ photo ─▶ downsized JPEG ─▶ Google Lens ─▶ YOU read + highlight ─▶ Tag
+          (fresh render,     (visible          the species name    (button on
+           EXIF/GPS stripped) Chrome window)    on Google's page     the page)
+                                                                       │
+        keywords ◀── plan (flat + hierarchy) ◀── canonical taxon ◀── GBIF resolve
 ```
 
-1. **Google Lens** (`src/shared/ProviderGoogleLens.lua` + the Node helper
-   `scripts/lens`): Lens has no anonymous API and renders results with JavaScript,
-   so a small helper uploads the image, transplants the anonymous session into your
-   installed Chrome, lets it render, and returns the visible match text — Google's
-   own AI-Overview answer plus the titles of pages showing the same image.
-2. **Parser** (`SpeciesParser.lua`) mines two channels: scientific binomials
-   (`Genus species`) and cleaned common-name candidates, ranked by how strongly and
-   how often they appear.
-3. **Taxonomy** (`Taxonomy.lua`) resolves each candidate against **GBIF** (free, no
-   key): a scientific name is confirmed by exact match; a common name is looked up
-   and normalised to its accepted species, with the full classification chain.
-4. **Scorer** (`Identify.lua`) combines the evidence into a confidence per taxon.
-   Lens's AI Overview is treated as the authoritative answer; the noisy visual-match
-   titles only corroborate. See [Accuracy](#accuracy--honest-numbers-no-regressions)
-   for exactly what the number means.
-5. **Keywording** (`Keywords.lua`) writes the result: flat `common` + `Latin`
+1. **Google Lens** (`src/shared/Http.lua` + the Node helper `scripts/lens`): the
+   helper uploads the downsized image and opens Google Lens in your installed Chrome —
+   a **visible** window showing Google's real results, with a small bottom bar (a Tag
+   button, a Skip button, and an "m of n" counter). The plugin does not read the page.
+2. **You choose** — read the results, refine in Google's own search box if you like, and
+   **highlight** the species name. Pressing **Tag** reads only your selection
+   (`window.getSelection()`) and hands that one string to the plugin.
+3. **Resolve** (`SelectedName.lua` → `Taxonomy.lua`): your selection is canonicalized
+   against **GBIF** (free, no key) — a binomial is confirmed by exact match; a common
+   name is normalised to its accepted species, with the full classification chain. GBIF
+   is the gate, so a common name that looks binomial still resolves correctly.
+4. **Keywording** (`Keywords.lua`) writes the result: flat `common` + `Latin`
    keywords, the full hierarchy, or both.
 
-The image-recognition step sits behind one small **provider seam**, so the whole
-parser → GBIF → scorer pipeline is pure, unit-tested, and unchanged no matter what
-feeds it.
-
-## Accuracy — honest numbers, no regressions
-
-This is built to be **measurable**, not vibes.
-
-```
-just test        # unit + accuracy specs (busted) — fully offline, no API keys
-just accuracy    # prints recall / top-1 / genus / family / false+ over the corpus
-```
-
-Each case in `spec/fixtures/manifest.lua` pairs a recorded Lens response with
-ground-truth species and replays it through the **real** parser/scorer/resolver.
-CI runs it on every push, so a change that quietly drops accuracy fails the build.
-
-**Two honesty notes worth reading:**
-
-- **The bundled Lens fixtures are *representative*, not live captures.** The GBIF
-  responses are real; the `spec/fixtures/lens/*.json` blobs are seeded from the
-  correct names plus realistic noise. So the offline 100% proves the **pipeline**
-  works on Lens-shaped input — it is *not* a measurement of real Lens recall. Measure
-  the real thing on your own photos with `just live-accuracy` (residential network).
-- **The confidence number is a bounded *evidence score*, not a calibrated
-  probability.** A "0.62" doesn't mean "62% correct"; it's a monotonic, transparent
-  score (the exact formula is in `Identify.lua`) used as an operating point. Ground
-  the threshold in *your* data with the calibration sweep:
-
-  ```
-  just live-accuracy -- --sweep    # precision / recall at every threshold
-  ```
-
-  Full detail: [docs/SCORING.md](docs/SCORING.md).
+The whole resolve → keyword pipeline is pure and unit-tested, independent of the browser
+helper that feeds it. The full mental model — the layers, the data flow, and a "where do
+I change X?" table — is in [ARCHITECTURE.md](ARCHITECTURE.md).
 
 ## Building from source
 
@@ -166,9 +126,9 @@ Everything is driven by scripts at the repo root (macOS / Linux; on Windows use 
 for the dev toolchain — Windows *end users* just download the release):
 
 ```
-./install.sh       # one-shot: toolchain + Lens helper deps + build + symlink into Lightroom
+./install.sh       # one-shot: toolchain + Lens helper deps + build + install a copy into Lightroom
 ./dev-setup.sh     # just the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
-./build.sh         # build dist/SpeciesTagger.lrplugin (+ zip + checksums)
+./build.sh         # build output/dist/SpeciesTagger.lrplugin (+ zip + checksums)
 ```
 
 Or the finer-grained [`just`](https://github.com/casey/just) recipes:
@@ -176,10 +136,10 @@ Or the finer-grained [`just`](https://github.com/casey/just) recipes:
 ```
 just check         # lint + test + build (run before pushing)
 just lint          # luacheck src spec scripts
-just test          # busted unit + accuracy specs
+just test          # busted unit specs
 just lens-test     # drive the real Lens helper against a fake Google (needs Chrome)
 just build         # compose the bundle, version-stamp, zip + checksums
-just install       # build + symlink into the local Lightroom Modules folder
+just install       # build + install a full plugin copy into ~/Documents/Lightroom Plugins (Add/Reload)
 ```
 
 There is no build step to memorise and **no AI in the loop**: `just check` is the
@@ -193,11 +153,10 @@ ours?" — no. Here's every tree and who wrote it.)*
 **Authored (this is the project):**
 
 ```
-src/shared/                 pure, testable modules (parser, taxonomy, scorer, keywords, provider)
+src/shared/                 pure, testable modules (name resolver, taxonomy, keywords, http)
 src/SpeciesTagger.lrplugin/ the Lightroom glue (menus, settings, catalog writes)
 scripts/lens/               the Google Lens browser helper (lens-search.js, overlay-inject.js, tests)
-scripts/*.lua               dev tooling (accuracy, corpus builders, live-accuracy, record-fixture)
-spec/                       unit specs + the accuracy harness + the labelled fixture corpus
+spec/                       unit specs (busted) + GBIF fixtures for offline tests
 build/build.lua             composes/stamps/zips the bundle
 docs/, *.sh, justfile       docs + entry-point scripts
 ```
@@ -232,17 +191,39 @@ Google Lens. No third-party image host is involved. Taxonomy lookups send only
 
 ## Limitations
 
-- Identifies to **species** (sometimes genus); subspecies and ambiguous look-alikes
-  may land in *needs review*. It's a fast first pass, not a taxonomist.
-- Accuracy is only as good as the image-search signal — clear, well-framed subjects
-  do best, and real Lens returns many related species per image.
-- The Lens backend is **best-effort and unofficial** (it automates a consumer Google
-  surface). Keep batches modest; run from a residential network.
+- It's only as good as **what you can find in Lens** — clear, well-framed subjects do
+  best, and Lens returns many related species, so you pick the right one.
+- It tags what **you** highlight: subspecies and look-alikes are your call, and GBIF
+  resolves to species/genus. It's a fast assist, not a taxonomist.
+- The Lens step is **best-effort** (a consumer Google surface, in your own browser).
+  Run from a residential network; solve any check yourself.
+
+## Scope & responsible use
+
+Species Tagger is designed to **work within Google's Terms of Service**, because it
+doesn't do the thing those terms restrict — automated access to, and extraction of,
+Google's results:
+
+- **You read, you choose.** Recognition runs in a **visible** Chrome window showing
+  Google's real results page. The plugin does **not** scrape or read those results —
+  **you** highlight the species name, and it uses only that selection.
+- **You initiate the search.** The plugin loads Lens and you add keywords / press
+  Search; there's no hidden or high-volume querying.
+- **Human in the loop for any check.** If Google shows an "are you human" check, you
+  solve it yourself in the window — the plugin never automates or bypasses a CAPTCHA.
+- **No account, no key, no third-party host, no bulk access.** An anonymous session on
+  your own machine; the image goes only to Google Lens, and only the name you
+  highlighted becomes keywords (resolved through the open **GBIF** API).
+
+It's a personal, one-photo-at-a-time tool; you remain responsible for your own use of
+third-party services.
 
 ## Contributing
 
 See [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up in one command, the test/lint
-gate, the architecture, and how to grow the corpus. Issues and PRs welcome.
+gate, and the layout. [ARCHITECTURE.md](ARCHITECTURE.md) is the mental model;
+[ROADMAP.md](ROADMAP.md) is where things are headed. Issues and PRs welcome — this
+project follows a [Code of Conduct](CODE_OF_CONDUCT.md).
 
 ## License
 

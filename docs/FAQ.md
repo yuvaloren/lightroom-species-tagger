@@ -1,89 +1,61 @@
 # FAQ
 
-### Why Google Lens / image search instead of a vision LLM?
-For species specifically, Google's reverse-image-search signal was consistently
-more accurate in testing than general multimodal models. This plugin uses that
-signal and then adds a real taxonomy resolver (GBIF) and a confidence model on
-top, so the output is canonical names rather than free-text guesses.
+### Why Google Lens instead of a vision LLM?
+For species specifically, Google Lens's reverse-image-search results were consistently
+the most useful signal in testing. Here you read those results yourself and pick the
+species; the plugin then turns your pick into canonical names via GBIF.
 
 ### Does it cost money? Do I need an API key?
-No money, and **no API key for anything**. Google Lens is keyless and GBIF (the
-taxonomy) is free and keyless. You do need **Node.js** and **Google Chrome**
-installed, because Lens has no API and renders results with JavaScript, so the
-plugin drives your real Chrome (in a visible window) to run the search. The
-released bundle is self-contained — the Lens helper's dependencies ship inside
-it, so there's nothing to `npm install`.
+No money, and **no API key for anything**. Google Lens is keyless and GBIF (the taxonomy)
+is free and keyless. You do need **Node.js** and **Google Chrome** installed, because the
+plugin opens Lens in your real Chrome. The released bundle is self-contained — the Lens
+helper's dependencies ship inside it, so there's nothing to `npm install`.
 
-### Is it reliable? How accurate is it?
-It's **best-effort**. Run it from a normal home (residential) connection —
-Google challenges or blocks datacenter/VPN/shared IPs; on any failure the photo
-falls through to **needs review**, so it never crashes or double-tags. Accuracy:
-the bundled offline test corpus is *representative* (deterministic, seeded from
-correct names plus realistic noise) and scores near 100%, but that measures the
-**pipeline**, not real Lens recall. Real captures score lower — Lens returns many
-related species per image, so the scorer misses some and over-tags others.
-Measure the real numbers on your own photos with `just live-accuracy`.
+### How accurate is it?
+It's as accurate as the name **you** pick. The plugin doesn't guess — it shows you
+Google's real results and you highlight the species; GBIF then resolves that to the
+accepted Latin name, preferred common name, and classification. Run it from a normal home
+(residential) connection — Google challenges datacenter/VPN/shared IPs. A photo you don't
+tag is simply left untouched.
 
 ### Does it run on Windows?
-Yes — **macOS, Linux, and Windows** are all supported. The Lens helper locates
-Chrome on each. On Windows, if Lightroom can't auto-find Node, set the **node
-path** in settings (e.g. `C:\Program Files\nodejs\node.exe`).
+Yes — **macOS, Linux, and Windows** are all supported. The Lens helper locates Chrome and
+Node on each automatically.
 
-### Can I add my own keywords to the search?
-Yes. At the start of each run the plugin prompts for optional **extra keywords**
-that get folded into the Lens image search as text refinement (things like
-`juvenile`, `reef`, or a place). Leave it blank for a plain image search, or turn
-the prompt off with **Ask for extra keywords each run** in settings.
+### Can I add keywords to the search?
+Yes — use **Google's own search box** on the Lens page to add words (`juvenile`, `reef`) or
+crop, then highlight the species and press Tag. (The plugin doesn't add a keyword box of
+its own.)
 
-### Does it use where the photo was taken?
-If the photo has GPS or IPTC place fields, the location is used two ways: as the
-**browser geolocation** *and* as text added to the Lens search, so Lens favours
-species that actually occur there.
+### Can I correct a wrong pick without re-shooting?
+Yes — nothing is read until you press Tag, so if you tagged the wrong thing, just highlight
+the right name and press Tag again. To remove an incorrect keyword, delete it from
+Lightroom's Keyword List.
 
-### Can I correct wrong tags without re-shooting?
-Yes — with **Keep the browser open** on, each photo's Lens results stay in its own
-tab. Refine the search in any tab(s) that were wrong (add words, crop, or pick a
-different match), then in Lightroom run **Plug-in Extras ▸ Re-tag from open Lens
-tabs** once. It sweeps **every** open Lens tab and re-tags each tab's own photo from
-your corrected search — no new upload, no marking, no per-photo selection.
-
-### Is the confidence score based on anything?
-It's honest but not magic: it's a bounded **evidence score** from 0 to 1, **not
-a calibrated probability**. A "0.62" does not mean "62% likely correct" — it's a
-monotonic, transparent score used as an operating point. The **Auto-tag
-confidence** threshold is where you set that operating point. Ground it in *your*
-data by calibrating against your own captures with `just live-accuracy -- --sweep`,
-which prints precision/recall at every threshold. Full detail in
-[docs/SCORING.md](SCORING.md).
+### How does it decide which species to tag?
+It doesn't — **you** do. It reads only the text you highlight and hands that one string to
+GBIF. There's no confidence score or auto-guessing; the identification is yours.
 
 ### Why does it sometimes pick an odd common name?
-The scientific (Latin) name is always GBIF's accepted name. The common name comes
-from what the image search surfaced when available, otherwise from GBIF's
-vernaculars — which occasionally aren't the most familiar one. The Latin name is
-the unambiguous anchor; rename the common keyword if you prefer another.
+The scientific (Latin) name is always GBIF's accepted name. The common name comes from
+GBIF's vernaculars, which occasionally aren't the most familiar one. The Latin name is the
+unambiguous anchor; rename the common keyword if you prefer another.
 
 ### Why GBIF for the names?
-GBIF's backbone is free, keyless, and authoritative. It turns a messy web label
-into the **accepted** scientific name, gives a **preferred common name**, and
-provides the full **Kingdom→Species** classification used for hierarchy keywords.
+GBIF's backbone is free, keyless, and authoritative. It turns whatever you highlight (a
+common name or a binomial) into the **accepted** scientific name, a **preferred common
+name**, and the full **Kingdom→Species** classification used for hierarchy keywords.
 
 ### Why both common and Latin names?
-Common names are searchable and human-friendly; Latin names are unambiguous and
-stable across languages and regions. Storing both makes your catalog findable now
-and correct later.
+Common names are searchable and human-friendly; Latin names are unambiguous and stable
+across languages and regions. Storing both makes your catalog findable now and correct
+later.
 
-### Will it tag two animals in one photo?
-Yes — every species that clears the confidence threshold is tagged. Some frames
-only surface the dominant subject; crop and re-run for the rest.
+### Can I tag two animals in one photo?
+Yes — highlight one, press Tag, then highlight the other and press Tag again before moving
+on. Both keywords are applied to the photo.
 
-### How do I know it's accurate / won't regress?
-Run `just accuracy` for a report over the labelled fixture corpus, and
-`just test` for the full suite. CI runs both on every push. Add your own photos
-to the corpus with `scripts/record-fixture.lua`.
-
-### It mislabelled something — what should I do?
-Refine the search and **re-parse** the tab (see above) to replace the tag. You
-can also raise or lower the **Auto-tag confidence** threshold to taste, and
-calibrate the threshold against your own captures with
-`just live-accuracy -- --sweep`. Identification is a fast first pass, not a
-substitute for an expert on tricky look-alikes.
+### How do I know a change didn't break it?
+`just check` runs luacheck + the offline unit tests + the build, and `just lens-test`
+drives the real Lens helper against a fake Google. CI runs them on every push. The live
+browser flow itself is verified by hand in Lightroom (it can't be exercised offline).

@@ -1,7 +1,7 @@
 --[[----------------------------------------------------------------------------
 spec/support/fixtures.lua
 Loads files from spec/fixtures/, resolving the directory relative to THIS file so
-it works no matter the current working directory (busted vs. scripts/accuracy.lua).
+it works no matter the current working directory.
 ------------------------------------------------------------------------------]]
 
 local json = require 'dkjson'
@@ -33,8 +33,5 @@ function M.loadJson( relpath )
 	return d
 end
 
-function M.manifest()
-	return dofile( M.DIR .. '/manifest.lua' )
-end
 
 return M

@@ -1,78 +1,43 @@
 #!/usr/bin/env node
 /*----------------------------------------------------------------------------
 scripts/lens/lens-search.js
-Google Lens species search via a real, VISIBLE browser — no paid API, no login.
+Assistive Google Lens helper — no scraping, no paid API, no login.
 
-Google Lens has no anonymous API and its results page is rendered by JavaScript,
-so neither curl nor Lightroom's LrHttp can read it. This helper:
-  1. uploads the image over curl to lens.google.com/v3/upload (-> a results URL
-     + a fresh anonymous session in a cookie jar),
-  2. transplants that whole session (incl. HttpOnly cookies) into the user's
-     installed Google Chrome via puppeteer-core,
-  3. navigates Chrome to the results URL so Chrome runs the JS and renders the
-     matches, and scrapes the visible match text.
-The Chrome window is always VISIBLE (not headless): we show Google's real page —
-ads and all — rather than scraping it invisibly. There is no headless mode for
-real runs; the only headless path is the local integration test (LENS_TEST_HEADLESS),
-which points at a fake server and never touches Google.
-Output (stdout): JSON { ok, count, strings:[…] } — the strings feed the plugin's
-SpeciesParser -> GBIF -> scorer pipeline (which gates precision), so this stays
-recall-oriented and tolerant of noise.
+For one photo it uploads the image to Google Lens the way the Lens website does, opens
+the results in the user's VISIBLE Chrome, and injects a small bottom bar with a Tag +
+Skip button and an "m of n" counter. The USER reads Google's real page and highlights the
+species name; pressing Tag records ONLY window.getSelection(). This helper never reads or
+scrapes Google's results — it returns just the string the user highlighted.
 
-Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core).
-Override Chrome with LENS_CHROME=/path/to/chrome. Run from a residential network.
-Usage: node lens-search.js <image.jpg> [lat lng | "City, State, Country"]
+Multi-photo: ONE persistent Chrome window is reused across photos (a fresh tab per photo,
+the previous one closed), on a fixed remote-debug port. The window is launched detached so
+it survives each per-photo invocation, and is closed cleanly at the end (LENS_ASSIST_CLOSE)
+so Chrome never shows a "didn't shut down correctly" restore prompt. The overlay talks to
+Node through page globals (window.__stTag / window.__stSkip) that Node POLLS — no
+exposeFunction, so it keeps working across those reconnects.
 
-Text refinement (optional): set LENS_QUERY to extra words (the user's keywords +
-the photo's place name) and the helper appends them to the visual search as a
-"multisearch" text refinement, so Lens weighs the image + words together. Best-
-effort — if Google ignores it, the plain image results come back unchanged.
+Output (stdout): a single JSON line — { ok:true, name } | { ok:false, cancelled|error }.
 
-Warm session: a persistent Chrome profile + cookie jar are kept under
-~/.cache/speciestagger-lens (override with LENS_CACHE_DIR) and reused across runs
-so the identity ages like a returning user rather than a pristine bot each time.
-Delete that dir to reset. On a Google "unusual traffic" challenge, a non-interactive
-run returns { ok:false, challenged:true } (the caller backs off) rather than
-scraping the challenge page; a single-photo run shows the control bar so the human
-can solve it in the visible window.
+Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core). Override Chrome
+with LENS_CHROME=/path/to/chrome. Run from a residential network.
 
-Keep open: with LENS_KEEP_TABS=1 the helper shares ONE persistent visible window
-across photos (a normal window WITH a tab strip) — a new tab per image, never closed —
-so the result pages stay for follow-ups (e.g. asking Google's AI more). It connects to
-an already-open window or launches a detached one on a fixed debug port (LENS_TABS_PORT,
-default 9333; separate profile ~/.cache/speciestagger-lens/chrome-profile-open).
-
-Interactive (handle Google "unusual traffic" / CAPTCHA / consent challenges):
-  LENS_INTERACTIVE=1        in the visible window, show a "Parse results" / "Cancel"
-                            control bar so the user can solve any challenge / consent
-                            wall, then auto-detect the real results (or the "Parse
-                            results" button) and parse those. A "Cancel" button /
-                            timeout aborts. node STAYS ALIVE until then, so the calling
-                            task blocks. (Single-photo runs only; a batch is hands-off.)
-  LENS_INTERACTIVE_TIMEOUT  ms to wait for the human before giving up (default 180000).
-
-Troubleshooting (opt-in via env; the plugin pipes stderr to /dev/null and reads
-only the single stdout JSON line, so these never affect a normal run):
-  LENS_HEADED=1     deprecated alias for LENS_DEBUG=1 (the window is always visible now)
-  LENS_DEBUG=1      write artifacts to LENS_DEBUG_DIR (default $TMPDIR/lens-debug):
-                    results-url.txt, uploaded.jpg, page.png, page.html,
-                    strings-sources.json (each scraped string + the page region it
-                    came from, with which were excluded as noise), result.json.
-                    Debug also goes to stderr.
-  LENS_KEEP_OPEN=1  leave a detached Chrome window open for inspection afterwards
-                    (node still exits, so callers don't hang — close it yourself)
-  LENS_SLOWMO=<ms>  slow Puppeteer actions so you can watch
-The ./debug-lens.sh wrapper sets all of these for you.
+Env:
+  LENS_ASSIST_POS      text shown in the bar, e.g. "Photo 2 of 5"
+  LENS_ASSIST_CLOSE=1  connect to the reuse window and close it cleanly, then exit
+  LENS_TABS_PORT       remote-debug port for the reuse window (default 9333)
+  LENS_CACHE_DIR       persistent profile + cookie jar (default ~/.cache/speciestagger-lens)
+  LENS_INTERACTIVE_TIMEOUT  ms to wait for a Tag/Skip before giving up (default 180000)
+  Test/debug: LENS_TEST_URL (skip upload, point at a local fake server),
+  LENS_TEST_HEADLESS=1 (headless — the ONLY headless path; local test only), LENS_DEBUG=1.
 ----------------------------------------------------------------------------*/
 const { execFileSync, spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const puppeteer = require('puppeteer-core');
-const { overlayInjector } = require('./overlay-inject');
+const { assistOverlayInjector } = require('./overlay-inject');
 
 const IS_WIN = process.platform === 'win32';
-// The system "discard" sink for curl -o, per platform.
 const NULL_DEVICE = IS_WIN ? 'NUL' : '/dev/null';
 
 // Locate the installed Google Chrome across macOS / Windows / Linux. Override with
@@ -97,33 +62,27 @@ function findChrome() {
     '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium',
   ];
   for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
-  return candidates[0]; // best guess; puppeteer will report a clear error if absent
+  return 'google-chrome'; // last resort: hope it's on PATH
 }
 const CHROME = findChrome();
 
-// Match the UA + Client Hints to the REAL installed Chrome. We MUST override the UA
-// because headless Chrome's default UA says "HeadlessChrome/<v>" (a blatant bot tell) —
-// but we override to the ACTUAL major version, not a hardcoded stale one, and we set
-// userAgentMetadata so Sec-CH-UA / navigator.userAgentData agree with the UA string. A
-// string-vs-Client-Hints mismatch (e.g. UA says Chrome/148 while the hints say 149) is
-// itself a self-contradiction no real browser produces, and a signal Google can gate on.
+// Match the UA + Client Hints to the REAL installed Chrome so Google serves the normal
+// results page (a HeadlessChrome UA, or a UA whose major disagrees with the Client Hints,
+// gets a degraded/blocked variant). About rendering the real page correctly, not disguise —
+// the window is visible the whole time.
 function chromeVersion() {
   try {
     const v = execFileSync(CHROME, ['--version'], { timeout: 10000 }).toString();
     const m = v.match(/(\d+)\.\d+\.\d+\.\d+/);
     if (m) return { full: m[0], major: m[1] };
   } catch (_) {}
-  return { full: '149.0.0.0', major: '149' }; // sane fallback if the version probe fails
+  return { full: '149.0.0.0', major: '149' };
 }
 const CHROME_VER = chromeVersion();
-// UA + Client-Hints platform, chosen to match the OS we're actually running on (a Mac
-// UA on Windows would itself be an inconsistency a server can flag).
 const PLATFORM = IS_WIN ? { ua: 'Windows NT 10.0; Win64; x64', ch: 'Windows', chVer: '10.0.0' }
   : process.platform === 'darwin' ? { ua: 'Macintosh; Intel Mac OS X 10_15_7', ch: 'macOS', chVer: '15.0.0' }
   : { ua: 'X11; Linux x86_64', ch: 'Linux', chVer: '' };
 const UA = `Mozilla/5.0 (${PLATFORM.ua}) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/${CHROME_VER.major}.0.0.0 Safari/537.36`;
-// Client Hints consistent with the UA above. The two real brands carry the true major
-// version; the third "GREASE" brand is deliberate noise servers are required to ignore.
 const UA_METADATA = {
   brands: [
     { brand: 'Chromium', version: CHROME_VER.major },
@@ -143,599 +102,147 @@ const UA_METADATA = {
   model: '',
   mobile: false,
 };
-// Warm-session cache: a PERSISTENT Chrome profile + cookie jar reused across photos and
-// runs. A fresh anonymous profile + brand-new cookie jar on every single request is
-// itself a bot signal (zero history, identical cold start every time); an aged, reused
-// identity looks like a returning user. Override the location with LENS_CACHE_DIR.
+
+// Session-reuse cache: a persistent profile + cookie jar reused across photos and runs, so
+// each photo doesn't start from a cold cookie/consent screen. Override with LENS_CACHE_DIR.
 const CACHE_DIR = process.env.LENS_CACHE_DIR || path.join(os.homedir(), '.cache', 'speciestagger-lens');
 try { fs.mkdirSync(CACHE_DIR, { recursive: true }); } catch (_) {}
+
 const img = process.argv[2];
-// optional photo location, to give Lens geographic context so it favours species
-// that occur there:
-//   node lens-search.js <image> <lat> <lng>        -- exact GPS coordinates
-//   node lens-search.js <image> "City, State, …"   -- a place name (geocoded)
-let lat = parseFloat(process.argv[3]);
-let lng = parseFloat(process.argv[4]);
-let hasGeo = Number.isFinite(lat) && Number.isFinite(lng);
-const place = (!hasGeo && process.argv[3] && process.argv[3].trim() !== '') ? process.argv[3].trim() : null;
-
-// Optional TEXT to add to the visual search (Google Lens "multisearch" / "Add to
-// your search"): the user's extra keywords + the photo's place name. Best-effort —
-// appended to the results URL as a text refinement so Lens weighs image + words
-// together; if Google ignores it, the plain image results are returned unchanged.
-const QUERY = (process.env.LENS_QUERY || '').trim();
-
-// In "keep browser open" mode we stamp each tab with the photo it belongs to
-// (window.__stPhotoPath), so --reparse can re-tag every open Lens tab's own photo.
-const PHOTO_PATH = process.env.LENS_PHOTO_PATH || '';
-const PHOTO_NAME = process.env.LENS_PHOTO_NAME || '';
-
-// Geocode a place name to coordinates via OpenStreetMap Nominatim (free, no key).
-async function geocode(name) {
-  try {
-    const u = 'https://nominatim.openstreetmap.org/search?format=json&limit=1&q=' + encodeURIComponent(name);
-    const r = await fetch(u, { headers: { 'User-Agent': 'lightroom-species-tagger/0.1 (species id)' } });
-    if (!r.ok) return null;
-    const j = await r.json();
-    if (Array.isArray(j) && j[0]) return { lat: parseFloat(j[0].lat), lng: parseFloat(j[0].lon) };
-  } catch (_) {}
-  return null;
-}
-const sleep = ms => new Promise(r => setTimeout(r, ms));
-// Run curl with an argv array (no shell), so it works identically on Windows and
-// POSIX and needs no manual quoting. Returns stdout as a string.
-const curl = args => execFileSync('curl', args, { timeout: 60000 }).toString();
-const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
-const fail = m => out({ ok: false, error: m, strings: [] });
-const cancel = () => out({ ok: false, cancelled: true, strings: [] });
-// Re-parse mode: don't upload anything — connect to the already-open "keep browser
-// open" window and re-scrape EVERY tab still on Google Lens (each stamped with the
-// photo it's for), so corrected searches re-tag their photos in one batch pass
-// (issue: "re-parse any open windows still on google lens").
-const REPARSE = process.argv.includes('--reparse');
-// Refine mode: don't upload — REUSE this photo's already-open keep-open tab, add the
-// LENS_QUERY text to its search in place (multisearch) and re-scrape. Used for the
-// location-assisted retry so it reuses the same tab instead of opening a second one.
-const REFINE = process.argv.includes('--refine');
-if (!REPARSE && !REFINE && (!img || !fs.existsSync(img))) fail('image not found: ' + img);
-
-// Google UI chrome / boilerplate to drop (the GBIF step would reject it anyway,
-// but trimming keeps the candidate set small).
-const STOP = new Set(['ai overview', 'visual matches', 'exact matches', 'related searches',
-  'search results', 'about this image', 'custom date range', 'choose what you’re giving feedback on',
-  'skip to main content', 'accessibility help', 'sign in', 'feedback', 'send feedback', 'translate',
-  'footer links', 'privacy', 'terms', 'help', 'update location', 'all', 'ai mode', 'images', 'more']);
-
-// --- opt-in debug / interactive modes (see header). All non-result output goes to stderr
-// + files; stdout stays the single JSON result line. Rendering is ALWAYS in a visible
-// Chrome window now — we don't run a hidden/headless scrape of Google's page. The only
-// headless path left is the local test harness (LENS_TEST_HEADLESS), which never hits Google.
-const DEBUG = process.env.LENS_DEBUG === '1' || process.env.LENS_HEADED === '1'; // LENS_HEADED kept as a debug alias
-const KEEPOPEN = process.env.LENS_KEEP_OPEN === '1'; // debug: leave the window open afterwards (detached)
-// User feature ("keep the browser open"): one persistent, visible window shared across
-// photos, a NEW TAB per image, never closed — so result pages stay for follow-ups.
-const KEEP_TABS = process.env.LENS_KEEP_TABS === '1';
-const INTERACTIVE = process.env.LENS_INTERACTIVE === '1';
-const INTERACTIVE_TIMEOUT = parseInt(process.env.LENS_INTERACTIVE_TIMEOUT || '180000', 10) || 180000;
-// Test hooks (integration test only): point at a local fake server instead of
-// uploading to Google, and allow the "visible" escalation window to run headless.
+const POS = (process.env.LENS_ASSIST_POS || '').trim();
+const CLOSE = process.env.LENS_ASSIST_CLOSE === '1';
 const TEST_URL = process.env.LENS_TEST_URL || '';
 const TEST_HEADLESS = process.env.LENS_TEST_HEADLESS === '1';
-const SLOWMO = parseInt(process.env.LENS_SLOWMO || '0', 10) || 0;
-const DBGDIR = process.env.LENS_DEBUG_DIR || path.join(os.tmpdir(), 'lens-debug');
+const TIMEOUT = parseInt(process.env.LENS_INTERACTIVE_TIMEOUT || '180000', 10) || 180000;
+const DEBUG = process.env.LENS_DEBUG === '1';
 const dbg = (...a) => { if (DEBUG) console.error('DEBUG', ...a); };
-const dbgWrite = (name, content) => {
-  if (!DEBUG) return;
-  try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.writeFileSync(path.join(DBGDIR, name), content); }
-  catch (e) { console.error('DEBUG write failed', name, e.message); }
-};
 
-// Apply the anonymous session to a fresh page: UA, webdriver patch, geolocation, cookies.
-async function prepPage(page, cookies, headed) {
-  await page.setUserAgent(UA, UA_METADATA);
-  if (!headed) await page.setViewport({ width: 1280, height: 1200 });
-  await page.evaluateOnNewDocument(() => Object.defineProperty(navigator, 'webdriver', { get: () => undefined }));
-  if (hasGeo) {
-    try {
-      await page.browserContext().overridePermissions('https://www.google.com', ['geolocation']);
-      await page.setGeolocation({ latitude: lat, longitude: lng });
-    } catch (_) {}
-  }
-  await page.setCookie(...cookies);
-}
+const sleep = ms => new Promise(r => setTimeout(r, ms));
+const curl = args => execFileSync('curl', args, { timeout: 60000 }).toString();
+const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
+const fail = m => out({ ok: false, error: m });
+const skip = () => out({ ok: false, cancelled: true });
 
-// Navigate to the results URL and give the JS a chance to render (matches + the
-// later-arriving AI Overview). opts.requireAi: wait harder for the AI Overview and do
-// NOT bail on the anchors-only heuristic — used by the location-assisted refine, where
-// the AI Overview is the whole point.
-async function loadResults(page, url, opts) {
-  opts = opts || {};
-  await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
-  const maxIter = opts.requireAi ? 22 : 15;
-  for (let i = 0; i < maxIter; i++) {
-    const r = await page.evaluate(() => ({
-      anchors: document.querySelectorAll('a[href]').length,
-      ai: /AI Overview/i.test(document.body ? document.body.innerText : ''),
-      challenged: !!document.querySelector('#captcha-form, .g-recaptcha, [data-sitekey], iframe[src*="recaptcha"]'),
-    })).catch(() => ({ anchors: 0, ai: false, challenged: false }));
-    if (r.challenged) break;             // a challenge won't resolve by waiting — assess + escalate
-    if (r.ai) break;                     // AI Overview rendered — results are ready
-    if (!opts.requireAi && r.anchors > 40 && i >= 6) break; // lots of anchors, no AI overview coming
-    await sleep(1000);
-  }
-}
-
-// Decide whether we have REAL Lens results or the session was challenged / not ready.
-// Collects raw signals in one page.evaluate, then folds in page.url() + frame urls.
-async function assessConfidence(page) {
-  const sig = await page.evaluate(() => {
-    const body = document.body ? document.body.innerText : '';
-    const lines = body.split('\n').map(s => s.trim()).filter(Boolean);
-    const has = sel => !!document.querySelector(sel);
-    return {
-      bodyLen: body.length,
-      anchors: document.querySelectorAll('a[href]').length,
-      captchaForm: has('#captcha-form, form#captcha-form, #recaptcha, .g-recaptcha, [data-sitekey], input[name="g-recaptcha-response"]'),
-      recaptchaIframe: has('iframe[src*="recaptcha"], iframe[src*="hcaptcha"], iframe[title*="recaptcha" i]'),
-      consentForm: has('form[action*="consent"]'),
-      consentText: /before you continue to google/i.test(body),
-      titleSorry: /sorry|unusual traffic|before you continue/i.test(document.title || ''),
-      noscriptEnableJs: /enable javascript/i.test((document.querySelector('noscript') || {}).textContent || ''),
-      aiOverview: lines.some(l => /^AI Overview$/i.test(l)),
-      matchesHeading: lines.some(l => /^(visual matches|exact matches)$/i.test(l)),
-      bigImgs: [...document.images].filter(im => im.naturalWidth > 32 && im.naturalHeight > 32).length,
-      nameLike: new Set(lines.filter(l => /[A-Z][a-z]+ [a-z]{3,}/.test(l))).size,
-    };
-  }).catch(() => null);
-  if (!sig) return { confident: false, reason: 'no-context', signals: null }; // mid-navigation
-  const url = page.url();
-  const frameUrls = page.frames().map(f => f.url());
-  const urlChallenged = [url, ...frameUrls].some(u =>
-    /\/sorry\/|sorry\.google\.|consent\.google\.|\/CheckConnection|ipv4check/i.test(u));
-  const lostVsrid = !/[?&]vsrid=/.test(url);
-  let reason;
-  if (urlChallenged || sig.captchaForm || sig.recaptchaIframe || sig.titleSorry) reason = 'challenged';
-  else if (sig.consentForm || sig.consentText || /consent\.google\./.test(url)) reason = 'consent';
-  else if (sig.noscriptEnableJs && sig.anchors < 15 && !sig.aiOverview) reason = 'shell';
-  else {
-    const strong = sig.aiOverview || sig.matchesHeading;
-    const rich = sig.bigImgs >= 10 && sig.nameLike >= 5 && sig.anchors > 40;
-    if ((strong && sig.nameLike >= 5) || rich) reason = 'ok';
-    else if (lostVsrid) reason = 'challenged';
-    else if (sig.bodyLen < 200 || sig.anchors < 15) reason = 'shell';
-    else reason = 'low-signal';
-  }
-  return { confident: reason === 'ok', reason, signals: sig };
-}
-
-// The region-aware scrape: harvest name-like strings, drop Related-searches/People-
-// also-search noise (and our own overlay), and extract the AI Overview prose.
-async function scrapeRaw(page) {
-  return page.evaluate(() => {
-    const out = [];
-    const sources = [];
-    // "Noise" sections — Related searches / People also search for / etc. A stray
-    // binomial chip there is NOT about the photo, so it must not be scraped.
-    const NOISE = /^(related searches|people also search for|people also ask|people also|more to ask|explore more|more results)\b/i;
-    const noiseRoots = [];
-    document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(h => {
-      if (NOISE.test((h.innerText || '').trim())) {
-        let n = h;
-        for (let k = 0; k < 3 && n.parentElement && n.parentElement !== document.body; k++) n = n.parentElement;
-        noiseRoots.push(n);
-      }
-    });
-    const inNoise = el => noiseRoots.some(r => r.contains(el));
-    const noiseLines = new Set();
-    noiseRoots.forEach(r => (r.innerText || '').split('\n').forEach(l => { l = l.trim(); if (l) noiseLines.add(l); }));
-
-    const regionOf = el => {
-      for (let n = el, up = 0; n && up < 8; up++, n = n.parentElement) {
-        for (let s = n, k = 0; s && k < 6; k++, s = s.previousElementSibling) {
-          if (s.matches && s.matches('h1,h2,h3,div[role=heading],[aria-level]')) {
-            const t = (s.innerText || '').replace(/\s+/g, ' ').trim();
-            if (t && t.length <= 60) return t;
-          }
-        }
-        const al = n.getAttribute && (n.getAttribute('aria-label') || n.getAttribute('data-attrid'));
-        if (al) return al;
-      }
-      return '';
-    };
-
-    const push = (t, el) => {
-      if (el && el.closest && el.closest('#__lens_overlay')) return; // never scrape our own UI
-      t = (t || '').replace(/\s+/g, ' ').trim();
-      if (!(t.length >= 4 && t.length <= 200 && /[a-z]/.test(t))) return;
-      const region = el ? regionOf(el) : 'body-text';
-      const noise = el ? (inNoise(el) || NOISE.test(region)) : noiseLines.has(t);
-      sources.push({ text: t, region: region, excluded: noise });
-      if (!noise) out.push(t);
-    };
-
-    document.querySelectorAll('h1,h2,h3,div[role=heading],[aria-level]').forEach(e => push(e.innerText, e));
-    document.querySelectorAll('a[href]').forEach(a => { const t = a.innerText; if (t && t.split(' ').length <= 14) push(t, a); });
-    const lines = (document.body ? document.body.innerText : '').split('\n').map(s => s.trim());
-    lines.forEach(line => { if (/[A-Z][a-z]+ [a-z]{3,}/.test(line)) push(line, null); });
-
-    // The "AI Overview" block is Google's single authoritative answer (it names
-    // the species + binomial). Grab the prose lines right after that heading.
-    const overview = [];
-    const i = lines.findIndex(l => /^AI Overview$/i.test(l));
-    if (i >= 0) {
-      for (let j = i + 1; j < lines.length && overview.length < 8; j++) {
-        const l = lines[j];
-        if (!l) { if (overview.length) break; else continue; }
-        if (/^(Show more|Visual matches|Related searches|People also|From sources|Feedback|Search Results|All|Exact matches|About this image)/i.test(l)) break;
-        if (l.length > 250) break;
-        overview.push(l);
-      }
-    }
-    return { strings: out, sources: sources, overview: overview.join(' ') };
-  });
-}
-
-// "Keep browser open" mode: ONE persistent, visible Chrome (a normal window WITH a tab
-// strip — tabs are the point here) shared across photos via a fixed remote-debug port.
-// Each photo opens a new tab in it and never closes it, so the user keeps the result
-// pages for follow-ups (e.g. asking Google's AI more). Connect to an already-open one,
-// else launch a detached one that survives this (per-photo) process exiting. Because it's
-// a connect()ed browser, puppeteer never kills it — process exit just drops the socket.
 const TABS_PORT = parseInt(process.env.LENS_TABS_PORT || '9333', 10) || 9333;
-const TABS_PROFILE = path.join(CACHE_DIR, 'chrome-profile-open');
-async function connectTabbed() {
+const TABS_PROFILE = path.join(CACHE_DIR, 'chrome-profile-assist');
+
+// Chrome shows a "didn't shut down correctly / restore pages?" bubble on startup when the
+// profile's last recorded exit wasn't "Normal" — and ONE unclean exit (a crash, a killed
+// process, or quitting Lightroom mid-run) poisons every launch after it. So before each
+// launch, force the profile's exit state to clean in its Preferences file. This is more
+// reliable than a flag (and avoids the "unsupported flag" warning bar on a visible window).
+function markProfileClean(profileDir) {
+  for (const pref of [path.join(profileDir, 'Default', 'Preferences'), path.join(profileDir, 'Preferences')]) {
+    try {
+      if (!fs.existsSync(pref)) continue;
+      const j = JSON.parse(fs.readFileSync(pref, 'utf8'));
+      j.profile = j.profile || {};
+      j.profile.exit_type = 'Normal';
+      j.profile.exited_cleanly = true;
+      fs.writeFileSync(pref, JSON.stringify(j));
+    } catch (_) { /* best-effort */ }
+  }
+}
+
+// Connect to the reuse window on TABS_PORT; launch a detached one if none is open (and
+// launchIfAbsent). Detached so it survives THIS per-photo process exiting; puppeteer never
+// kills a connect()ed browser, so we close it explicitly at the end (see CLOSE).
+async function connectWindow(launchIfAbsent) {
   const tryConnect = () => puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null });
-  try { return await tryConnect(); } catch (_) {}   // an existing keep-open window?
+  try { return await tryConnect(); } catch (_) {}
+  if (!launchIfAbsent) return null;
   try { fs.mkdirSync(TABS_PROFILE, { recursive: true }); } catch (_) {}
-  const visArgs = TEST_HEADLESS ? ['--headless=new'] : []; // headless only for the integration test
+  markProfileClean(TABS_PROFILE); // never nag about a previous unclean exit
+  const visArgs = TEST_HEADLESS ? ['--headless=new', '--no-sandbox'] : ['--window-size=1280,960'];
   const proc = spawn(CHROME, ['--remote-debugging-port=' + TABS_PORT, '--user-data-dir=' + TABS_PROFILE,
-    '--no-first-run', '--no-default-browser-check', '--lang=en-US', '--window-size=1280,960',
-    ...visArgs, 'about:blank'], { detached: true, stdio: 'ignore' });
+    '--no-first-run', '--no-default-browser-check', '--lang=en-US', ...visArgs, 'about:blank'],
+    { detached: true, stdio: 'ignore' });
   proc.unref();
   for (let i = 0; i < 100; i++) { await sleep(100); try { return await tryConnect(); } catch (_) {} }
-  throw new Error('could not start the keep-open Chrome window (port ' + TABS_PORT + ')');
+  throw new Error('could not start the assist Chrome window (port ' + TABS_PORT + ')');
 }
 
-// Injected into each keep-open tab. Self-contained (runs in the page via
-// evaluateOnNewDocument on every document), taking the photo's path + name as args:
-//   1) stamps the tab with the photo it belongs to (window.__stPhotoPath/Name), so
-//      --reparse can re-tag every open Lens tab's own photo;
-//   2) records when you last worked in THIS tab (window.__stLastActive), used to
-//      order the re-parse output most-recent-first;
-//   3) shows a small hint bar reminding you how to re-parse from Lightroom.
-function keepOpenBarInjector(photoPath, photoName) {
-  if (window.top !== window.self) return;               // top frame only
-  try { window.__stPhotoPath = photoPath || ''; window.__stPhotoName = photoName || ''; } catch (_) {}
-  const bump = () => { try { window.__stLastActive = Date.now(); } catch (_) {} };
-  bump();                                               // loading this tab counts as activity
-  ['mousedown', 'keydown', 'focus', 'visibilitychange'].forEach(e => {
-    try { document.addEventListener(e, () => { if (document.visibilityState === 'visible') bump(); }, true); } catch (_) {}
-  });
-  const add = () => {
-    if (!document.body || document.getElementById('__lens_keepbar')) return;
-    const bar = document.createElement('div');
-    bar.id = '__lens_keepbar';
-    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#202124;color:#fff;font:13px sans-serif;padding:6px 12px;box-shadow:0 -2px 8px rgba(0,0,0,.4)';
-    bar.textContent = 'Species Tagger — refine this search if the tag was wrong (in any tab), then switch to ' +
-      'Lightroom and run “Re-parse Lens Tabs & Re-tag”. It re-reads every open Lens tab and re-tags each photo.';
-    document.body.appendChild(bar);
-  };
-  if (document.body) add();
-  else document.addEventListener('DOMContentLoaded', add);
+// UA + the anonymous session cookies on a fresh page. No geolocation (measured to hurt),
+// no navigator.webdriver spoof (measured to make no difference) — the window is visible.
+async function prepPage(page, cookies) {
+  await page.setUserAgent(UA, UA_METADATA);
+  if (TEST_HEADLESS) await page.setViewport({ width: 1280, height: 1200 });
+  if (cookies && cookies.length) { try { await page.setCookie(...cookies); } catch (_) {} }
 }
 
-// Re-parse: connect to the keep-open window and scrape EVERY tab still on Google
-// Lens results, returning one entry per tab tagged with the photo it belongs to
-// (window.__stPhotoPath). This lets Lightroom re-tag each photo from its own refined
-// search in a single pass. Tabs are ordered most-recently-worked-in first.
-async function reparse() {
-  let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null }); }
-  catch (_) { fail('no open Lens window found — run a search with “Keep the browser open” on first.'); return; }
-  const candidates = [];
-  for (const p of await browser.pages()) {
-    let info;
-    try {
-      info = await p.evaluate(() => ({ url: location.href, last: window.__stLastActive || 0,
-        photoPath: window.__stPhotoPath || '', photoName: window.__stPhotoName || '' }));
-    } catch (_) { continue; }
-    if (!info.url || /^about:blank/.test(info.url)) continue;
-    // still on Google Lens results? (a search / results / lens tab, incl. a refined
-    // multisearch URL) — skip the user's unrelated tabs.
-    if (!/google\.|lens\.|[?&]vsrid=|\/(search|results)\b/.test(info.url)) continue;
-    candidates.push({ page: p, ...info });
+// Upload the image to Lens the way the website does -> { results URL, session cookies }.
+function uploadImage() {
+  const jar = path.join(CACHE_DIR, 'cookies.txt');
+  if (!fs.existsSync(jar)) {
+    fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
+      '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
+      '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
   }
-  if (!candidates.length) {
-    try { browser.disconnect(); } catch (_) {}
-    fail('no open Google Lens results tabs found — run a search with “Keep the browser open” on first.');
-    return;
-  }
-  candidates.sort((a, b) => b.last - a.last);            // most-recently-worked-in first
-  const tabs = [];
-  for (const c of candidates) {
-    // drop our own hint bar so it can't leak into the scraped text
-    try { await c.page.evaluate(() => { const o = document.getElementById('__lens_keepbar'); if (o) o.remove(); }); } catch (_) {}
-    const data = await scrapeRaw(c.page).catch(() => ({ strings: [], overview: '' }));
-    const seen = new Set(); const clean = [];
-    for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
-    if (!clean.length && !data.overview) continue;        // an empty / consent tab — nothing to re-tag
-    tabs.push({ photoPath: c.photoPath, photoName: c.photoName,
-      overview: data.overview || '', strings: clean.slice(0, 80), count: clean.length });
-  }
-  try { browser.disconnect(); } catch (_) {}               // never kill the user's window
-  if (!tabs.length) { fail('the open Lens tabs had no results to re-parse — refine a search and retry.'); return; }
-  out({ ok: true, reparsed: true, tabs: tabs });
-}
-
-// Refine THIS photo's existing keep-open tab in place (the location-assisted retry):
-// connect to the window, find the tab for LENS_PHOTO_PATH (else the most-recent Lens
-// tab), add the LENS_QUERY text to its current results URL (multisearch) and reload —
-// no re-upload, no new tab, the SAME tab is reused — then scrape. Returns
-// { ok, refined, overview, strings }. Requires keep-open mode + a prior search.
-async function refine() {
-  if (!QUERY) { fail('refine needs LENS_QUERY (the location text)'); return; }
-  let browser;
-  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null }); }
-  catch (_) { fail('no open Lens window to refine — needs “Keep the browser open”.'); return; }
-  let target = null, best = -1;
-  for (const p of await browser.pages()) {
-    let info;
-    try { info = await p.evaluate(() => ({ url: location.href, last: window.__stLastActive || 0, photoPath: window.__stPhotoPath || '' })); }
-    catch (_) { continue; }
-    if (!info.url || /^about:blank/.test(info.url)) continue;
-    if (!/google\.|lens\.|[?&]vsrid=|\/(search|results)\b/.test(info.url)) continue;
-    // strongly prefer this photo's own tab; otherwise fall back to the most-recent Lens tab
-    const rank = (PHOTO_PATH && info.photoPath === PHOTO_PATH ? 1e15 : 0) + info.last;
-    if (rank > best) { best = rank; target = { page: p, url: info.url }; }
-  }
-  if (!target) { try { browser.disconnect(); } catch (_) {} fail('no open Lens tab found to refine.'); return; }
-  // strip any existing q= text refinement, then append the new one, and reload the tab
-  let url = target.url.replace(/([?&])q=[^&]*&?/, '$1').replace(/[?&]$/, '');
-  url += (url.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(QUERY);
-  dbg('refine: reusing tab -> ' + url);
+  let url;
   try {
-    try { await target.page.bringToFront(); } catch (_) {}
-    // Re-stamp so a later --reparse still maps this tab to its photo (the Pass-1
-    // injector was registered by a different process and is dropped on reload).
-    try { await target.page.evaluateOnNewDocument(keepOpenBarInjector, PHOTO_PATH, PHOTO_NAME); } catch (_) {}
-    // Force a FULL reload: a query-only nav on the already-loaded Lens SPA does NOT
-    // regenerate the AI Overview (Google treats it as an in-page update), so blank the
-    // tab first — then wait specifically for the AI Overview.
-    await target.page.goto('about:blank').catch(() => {});
-    await loadResults(target.page, url, { requireAi: true });
-    try { await target.page.evaluate(() => { const o = document.getElementById('__lens_keepbar'); if (o) o.remove(); }); } catch (_) {}
-    const data = await scrapeRaw(target.page).catch(() => ({ strings: [], overview: '' }));
-    const seen = new Set(); const clean = [];
-    for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
-    try { browser.disconnect(); } catch (_) {}             // never kill the user's window
-    out({ ok: true, refined: true, overview: data.overview || '', strings: clean.slice(0, 80) });
-  } catch (e) { try { browser.disconnect(); } catch (_) {} fail('refine failed: ' + e.message); }
+    curl(['-sS', '--compressed', '-A', UA, '-b', jar, '-c', jar, '-o', NULL_DEVICE, 'https://www.google.com/']);
+    url = curl(['-sS', '--compressed', '-L', '-A', UA, '-b', jar, '-c', jar,
+      '-H', 'Origin: https://www.google.com', '-H', 'Referer: https://www.google.com/',
+      '-F', 'encoded_image=@' + img + ';type=image/jpeg', '-o', NULL_DEVICE, '-w', '%{url_effective}',
+      'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=' + Date.now()]).trim();
+  } catch (e) { fail('upload failed: ' + e.message); }
+  if (!/[?&]vsrid=/.test(url)) fail('upload rejected (no results URL)');
+  const cookies = fs.readFileSync(jar, 'utf8').split('\n')
+    .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
+    .map(l => { const p = l.split('\t'); return p.length >= 7 ? { name: p[5], value: p[6], domain: p[0], path: p[2], secure: p[3] === 'TRUE' } : null; })
+    .filter(Boolean);
+  return { url, cookies };
 }
 
-// Launch a visible Chrome we DON'T own (detached + connect). puppeteer only kills
-// browsers it *launched*, never connect()ed ones, so we control teardown explicitly.
-async function openDetachedChrome() {
-  const udd = fs.mkdtempSync(path.join(os.tmpdir(), 'lens-chrome-'));
-  const visArgs = TEST_HEADLESS ? ['--headless=new'] : ['--start-maximized']; // headless for CI tests
-  // NB: no --disable-blink-features=AutomationControlled here — recent Chrome shows
-  // an "unsupported command-line flag" warning bar for it on a visible window. We get
-  // the same effect (hidden navigator.webdriver) from prepPage's evaluateOnNewDocument.
-  const proc = spawn(CHROME, ['--remote-debugging-port=0', '--user-data-dir=' + udd,
-    '--no-first-run', '--no-default-browser-check',
-    '--lang=en-US', ...visArgs, 'about:blank'], { detached: true, stdio: 'ignore' });
-  proc.unref();
-  const portFile = path.join(udd, 'DevToolsActivePort');
-  let endpoint;
-  for (let i = 0; i < 100 && !endpoint; i++) {
-    if (fs.existsSync(portFile)) {
-      const p = fs.readFileSync(portFile, 'utf8').split('\n');
-      if (p[0] && p[0].trim()) endpoint = 'http://127.0.0.1:' + p[0].trim();
-    }
-    if (!endpoint) await sleep(100);
+// Poll the page for the user's Tag (window.__stTag) or Skip (window.__stSkip), or time out.
+// No exposeFunction, so this keeps working across window reconnects and page navigations.
+async function waitForTag(page) {
+  const deadline = Date.now() + TIMEOUT;
+  while (Date.now() < deadline) {
+    let s = null;
+    try { s = await page.evaluate(() => ({ tag: window.__stTag || null, skip: !!window.__stSkip })); }
+    catch (_) { /* mid-navigation — try again */ }
+    if (s && s.tag) return { via: 'tag', name: String(s.tag).trim() };
+    if (s && s.skip) return { via: 'skip' };
+    await sleep(300);
   }
-  if (!endpoint) throw new Error('could not start a visible Chrome (no DevToolsActivePort)');
-  const browser = await puppeteer.connect({ browserURL: endpoint, defaultViewport: null });
-  return { browser, proc, endpoint };
-}
-
-// Inject the Parse/Cancel control bar. Bound ONCE (exposeFunction re-binds window.*
-// on every navigation automatically) + re-added on every document so it survives
-// the navigations a CAPTCHA/consent solve causes.
-async function installInteractive(page) {
-  let resolveParse, resolveCancel;
-  const parseClicked = new Promise(r => (resolveParse = r));
-  const cancelClicked = new Promise(r => (resolveCancel = r));
-  await page.exposeFunction('__lensParse', () => resolveParse({ via: 'parse' }));
-  await page.exposeFunction('__lensCancel', () => resolveCancel({ via: 'cancel' }));
-  // overlayInjector (./overlay-inject) adds the control bar to the TOP frame only —
-  // see that module + test/overlay-frame.test.js for why subframes must be skipped.
-  await page.evaluateOnNewDocument(overlayInjector);
-  return { parseClicked, cancelClicked };
-}
-
-// Wait for the real results, racing: stable auto-detect / Parse click / Cancel click /
-// timeout. assessConfidence is polled (it tolerates mid-navigation) and must read
-// confident 3x in a row (~2s) so we never scrape a half-rendered post-CAPTCHA page.
-async function waitForResult(page, parseClicked, cancelClicked) {
-  let settled = false;
-  const autoDetected = (async () => {
-    let streak = 0;
-    while (!settled) {
-      await sleep(700);
-      let ok = false;
-      try { ok = (await assessConfidence(page)).confident; } catch (_) { ok = false; }
-      streak = ok ? streak + 1 : 0;
-      if (streak >= 3) return { via: 'auto' };
-    }
-    return new Promise(() => {}); // never resolves once another branch wins
-  })();
-  let timer;
-  const timedOut = new Promise(r => { timer = setTimeout(() => r({ via: 'timeout' }), INTERACTIVE_TIMEOUT); });
-  const outcome = await Promise.race([autoDetected, parseClicked, cancelClicked, timedOut]);
-  settled = true; clearTimeout(timer);
-  return outcome;
-}
-
-// Kill a detached process tree, cross-platform: taskkill /T on Windows, the
-// negative-PID process-group signal on POSIX (the child was spawned detached, so it
-// leads its own group).
-function killTree(pid) {
-  if (IS_WIN) {
-    try { execFileSync('taskkill', ['/PID', String(pid), '/T', '/F'], { stdio: 'ignore' }); } catch (_) {}
-  } else {
-    try { process.kill(-pid, 'SIGTERM'); } catch (_) {}
-  }
-}
-
-// Close down per the launch mode: a connected detached window is disconnected (and
-// killed unless KEEPOPEN); a launched headless browser is killed by puppeteer on exit.
-function teardown(browser, escProc) {
-  try {
-    if (escProc) {
-      try { if (browser) browser.disconnect(); } catch (_) {}
-      if (!KEEPOPEN) killTree(escProc.pid);
-    }
-  } catch (_) {}
-}
-
-// Final step shared by every success path: drop the overlay, capture debug artifacts,
-// scrape, build the result, tear down, and emit the single JSON line.
-async function emit(page, browser, escProc) {
-  await page.evaluate(() => { ['__lens_overlay', '__lens_keepbar'].forEach(id => { const o = document.getElementById(id); if (o) o.remove(); }); }).catch(() => {});
-  if (DEBUG) {
-    try { fs.mkdirSync(DBGDIR, { recursive: true }); } catch (_) {}
-    await page.screenshot({ path: path.join(DBGDIR, 'page.png'), fullPage: true }).catch(() => {});
-    try { fs.writeFileSync(path.join(DBGDIR, 'page.html'), await page.content()); } catch (_) {}
-  }
-  const data = await scrapeRaw(page);
-  const seen = new Set(); const clean = [];
-  for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
-  const result = { ok: true, count: clean.length, overview: data.overview || '', strings: clean.slice(0, 80) };
-  if (DEBUG) {
-    dbgWrite('strings-sources.json', JSON.stringify(data.sources || [], null, 2));
-    dbgWrite('result.json', JSON.stringify(result, null, 2));
-    const dropped = (data.sources || []).filter(s => s.excluded).length;
-    dbg('scraped ' + clean.length + ' strings; excluded ' + dropped + ' from noise regions; AI overview ' + (result.overview ? 'present' : 'EMPTY'));
-  }
-  if (KEEPOPEN) console.error('DEBUG: Chrome window left open for inspection — close it when done.');
-  teardown(browser, escProc);
-  out(result);
+  return { via: 'timeout' };
 }
 
 (async () => {
-  if (REPARSE) { await reparse(); return; }               // scrape the open tab; no upload
-  if (REFINE) { await refine(); return; }                 // add location to this photo's tab; no upload
-  if (!hasGeo && place) {
-    const c = await geocode(place);
-    if (c) { lat = c.lat; lng = c.lng; hasGeo = true; }
+  // Close command: connect to the reuse window and shut it down cleanly (no restore prompt).
+  if (CLOSE) {
+    const b = await connectWindow(false);
+    if (b) { try { await b.close(); } catch (_) {} }
+    out({ ok: true, closed: true });
+    return;
   }
-  dbg('geo: place=' + place + ' hasGeo=' + hasGeo + ' lat=' + lat + ' lng=' + lng);
+
+  if (!img || (!TEST_URL && !fs.existsSync(img))) fail('image not found: ' + img);
+
   let url, cookies = [];
-  if (TEST_URL) {
-    // Test mode: skip the upload, point Chrome at the local fake server.
-    url = TEST_URL;
-    dbg('TEST mode: pointing at', url);
-  } else {
-    // Persistent jar (warm session): reuse + age the cookies across runs. Seed the
-    // consent cookies only when first creating it; thereafter let curl read/refresh it.
-    const jar = path.join(CACHE_DIR, 'cookies.txt');
-    if (!fs.existsSync(jar)) {
-      fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
-        '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
-        '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
-    }
-    try {
-      curl(['-sS', '--compressed', '-A', UA, '-b', jar, '-c', jar, '-o', NULL_DEVICE, 'https://www.google.com/']);
-      url = curl(['-sS', '--compressed', '-L', '-A', UA, '-b', jar, '-c', jar,
-        '-H', 'Origin: https://www.google.com', '-H', 'Referer: https://www.google.com/',
-        '-F', 'encoded_image=@' + img + ';type=image/jpeg', '-o', NULL_DEVICE, '-w', '%{url_effective}',
-        'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=' + Date.now()]).trim();
-    } catch (e) { fail('upload failed: ' + e.message); }              // keep the jar (it's persistent/warm)
-    if (!/[?&]vsrid=/.test(url)) fail('upload rejected (no results URL)');
-    cookies = fs.readFileSync(jar, 'utf8').split('\n')
-      .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
-      .map(l => { const p = l.split('\t'); return p.length >= 7 ? { name: p[5], value: p[6], domain: p[0], path: p[2], secure: p[3] === 'TRUE' } : null; })
-      .filter(Boolean);
-  }
-  // Add the text refinement (extra keywords + place) to the visual search, if any.
-  // Best-effort multisearch: Lens weighs the image + this text together. If Google
-  // ignores the param, the URL still renders the normal image results.
-  if (QUERY) {
-    url += (url.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(QUERY);
-    dbg('added text refinement to search: ' + QUERY);
-  }
+  if (TEST_URL) { url = TEST_URL; }
+  else { const u = uploadImage(); url = u.url; cookies = u.cookies; }
   dbg('results URL:', url);
-  dbgWrite('results-url.txt', url);
-  if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.copyFileSync(img, path.join(DBGDIR, 'uploaded.jpg')); } catch (e) { dbg('uploaded.jpg copy failed:', e.message); } }
 
-  let browser = null, escProc = null, page = null;
-  // ALWAYS render in a VISIBLE Chrome window so Google's actual page — ads and all — is
-  // shown while we work; we do not run a hidden headless scrape. LENS_TEST_HEADLESS is the
-  // sole headless path (local test server). Three window modes:
-  //   KEEP_TABS : one persistent window, a NEW TAB per image, never closed (user feature).
-  //   KEEPOPEN  : a detached window kept open for inspection (debug).
-  //   default   : a small chrome-less --app popup that closes after each image.
+  let browser = null;
   try {
-    if (KEEP_TABS) {
-      browser = await connectTabbed();             // connected (not launched): survives our exit
-      const open = await browser.pages();
-      page = open.find(p => p.url() === 'about:blank') || await browser.newPage(); // a tab for this image
-    } else if (KEEPOPEN) {
-      const d = await openDetachedChrome(); browser = d.browser; escProc = d.proc;
-      dbg('opened a detached visible Chrome window —', d.endpoint);
-      page = (await browser.pages())[0] || await browser.newPage();
-    } else {
-      browser = await puppeteer.launch({
-        executablePath: CHROME,
-        headless: TEST_HEADLESS ? 'new' : false,   // visible for real use; headless ONLY for the local test harness
-        slowMo: SLOWMO,
-        dumpio: DEBUG,
-        // Persistent profile (warm session): aged NID/history across runs, not a pristine
-        // bot profile each time. Batch photos run sequentially so there's no dir contention.
-        userDataDir: path.join(CACHE_DIR, 'chrome-profile'),
-        defaultViewport: null,                       // viewport follows the real window size
-        // App-style popup window: small, and with no tabs / toolbar / bookmark bar — just
-        // the page. We open it on about:blank so prepPage can set the UA/cookies/geo before
-        // we navigate to the results URL (the app window stays chromeless across that nav).
-        args: ['--no-sandbox', '--no-first-run', '--no-default-browser-check', '--lang=en-US']
-          .concat(TEST_HEADLESS ? [] : ['--app=about:blank', '--window-size=1280,960']),
-      });
-      page = (await browser.pages())[0] || await browser.newPage();
-    }
-    const headed = !TEST_HEADLESS;
-    await prepPage(page, cookies, headed);
-
-    // Keep-open tabs stay for follow-ups: stamp each with its photo + show the hint bar
-    // so refined searches can be re-parsed + re-tagged in one batch from Lightroom (issue 8).
-    if (KEEP_TABS) { try { await page.evaluateOnNewDocument(keepOpenBarInjector, PHOTO_PATH, PHOTO_NAME); } catch (_) {} }
-
-    if (!INTERACTIVE) {
-      // Non-interactive (batch): load, then bail CLEARLY on a challenge so the caller can
-      // back off — never scrape the /sorry or consent page as if it were results (that
-      // returned the captcha boilerplate as fake species candidates).
-      await loadResults(page, url);
-      const a = await assessConfidence(page);
-      if (a.reason === 'challenged' || a.reason === 'consent') {
-        dbg('non-interactive challenge:', a.reason, '— signalling the caller to back off');
-        if (DEBUG) { try { fs.mkdirSync(DBGDIR, { recursive: true }); fs.writeFileSync(path.join(DBGDIR, 'page-challenge.html'), await page.content()); } catch (_) {} }
-        teardown(browser, escProc);
-        out({ ok: false, challenged: true, reason: a.reason, strings: [] });
-        return;
-      }
-      await emit(page, browser, escProc);
-      return;
-    }
-
-    // Interactive (single photo): we're already visible, so show the control bar, navigate,
-    // and wait for the human to solve any Google check (or auto-detect real results).
-    const { parseClicked, cancelClicked } = await installInteractive(page);
+    browser = await connectWindow(true);
+    // Reuse ONE window: open a fresh tab for this photo, close the others, so there's a
+    // single visible tab and the overlay's evaluateOnNewDocument can't accumulate.
+    const page = await browser.newPage();
+    for (const p of await browser.pages()) { if (p !== page) { try { await p.close(); } catch (_) {} } }
+    await prepPage(page, cookies);
+    await page.evaluateOnNewDocument(assistOverlayInjector, POS || null);
     await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
-    const outcome = await waitForResult(page, parseClicked, cancelClicked);
-    dbg('interactive outcome:', outcome.via);
-    if (outcome.via === 'cancel' || outcome.via === 'timeout') { teardown(browser, escProc); cancel(); return; }
-    await emit(page, browser, escProc);
+    const outcome = await waitForTag(page);
+    dbg('assist outcome:', outcome.via, outcome.name || '');
+    try { browser.disconnect(); } catch (_) {}   // leave the window open for the next photo / close step
+    if (outcome.via === 'tag' && outcome.name) out({ ok: true, name: outcome.name });
+    else if (outcome.via === 'skip') skip();
+    else out({ ok: false, error: 'no species tagged (timed out waiting for a selection)' });
   } catch (e) {
-    teardown(browser, escProc);
-    fail('render failed: ' + e.message);
+    try { if (browser) browser.disconnect(); } catch (_) {}
+    fail('assist failed: ' + (e && e.message ? e.message : String(e)));
   }
 })();

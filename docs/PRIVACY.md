@@ -12,22 +12,21 @@ is involved — the bytes go straight to Google Lens.
 
 ### Google Lens
 - The downsized JPEG **bytes** are uploaded to `lens.google.com` (the same
-  endpoint the Lens website uses). Because Lens has no anonymous API and renders
-  results with JavaScript, the plugin drives your **installed Google Chrome** (in a
-  **visible window**, via the bundled Node helper, so Google's real page is shown
-  rather than scraped invisibly) to run the search and read the results.
+  endpoint the Lens website uses) and shown in your **installed Google Chrome** in a
+  **visible window** — Google's real results page. **You** read it and **highlight**
+  the species name; the plugin then uses only that highlighted text. The plugin does
+  not read or scrape the page for you.
 - An **anonymous** Google session is used (no account, no login, no cookie to
-  paste). To look like a returning user rather than a fresh bot each time, the
-  helper keeps a **local Chrome profile + cookie jar** under
+  paste). So you're not re-accepting Google's cookie/consent screen on every photo,
+  the helper keeps a **local Chrome profile + cookie jar** under
   `~/.cache/speciestagger-lens` (or the OS-appropriate cache directory) and reuses
   it across runs — these cookies stay on your machine and are sent only to Google;
   delete that folder to reset. No API key and no third-party host are involved.
-  This is automated access to a consumer Google surface, so Google may rate-limit
-  or block it (run it from a normal home connection); nothing is sent anywhere else.
-- If you provide **extra keywords** for a run, or the photo has a **location**
-  (GPS/IPTC), that text is added to the Lens search and therefore sent to Google
-  as part of the query. The location is also used as the browser's geolocation for
-  the search.
+  This drives a consumer Google surface in a visible browser, so Google may rate-limit
+  or challenge it (run it from a normal home connection); nothing is sent anywhere else.
+- If you type **extra keywords** into the on-page bar and press Search, that text is
+  added to the Lens search and therefore sent to Google as part of the query. Nothing
+  else about the photo is sent.
 
 ### Taxonomy (GBIF)
 Only **text names** (e.g. `Sufflamen bursa`, `Lei triggerfish`) are sent to
@@ -41,9 +40,10 @@ GBIF needs no key and is queried anonymously.
 - This plugin keeps no other data and phones home to nothing else.
 
 ## Third-party terms
-You are responsible for complying with the terms of the services you use. Note in
-particular that Google Lens here is **automated access to a consumer Google
-surface** without an official API; Google's Terms of Service discourage automated
-access, so use it for your own low-volume personal tagging. Taxonomy uses
-[GBIF](https://www.gbif.org/terms). Don't upload images you're not allowed to send
-to third parties.
+Species Tagger is built to **work within Google's Terms of Service**. It does **not
+scrape or extract Google's results**: it opens Google Lens in a **visible** browser,
+**you** read the page and **highlight** the species name yourself, and the plugin uses
+**only that selection** — it performs no automated reading of Google's content and no
+bulk access. Taxonomy resolution uses the open [GBIF](https://www.gbif.org/terms) API.
+You remain responsible for your own use of third-party services, and shouldn't upload
+images you're not allowed to send to them.

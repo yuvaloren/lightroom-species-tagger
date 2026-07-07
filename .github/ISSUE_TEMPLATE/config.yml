@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: Question or help using the plugin
+    url: https://github.com/yoren/lightroom-species-tagger/discussions
+    about: Ask in Discussions — for how-to questions and setup help (not bugs).
+  - name: Troubleshooting guide
+    url: https://github.com/yoren/lightroom-species-tagger/blob/main/docs/TROUBLESHOOTING.md
+    about: Google challenges, "no output", Node not found, and other common snags.
+  - name: Security vulnerability
+    url: https://github.com/yoren/lightroom-species-tagger/security/advisories/new
+    about: Please report security issues privately, not as a public issue.

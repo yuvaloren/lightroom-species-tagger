@@ -19,7 +19,7 @@ setup:
 # install the Lua dev tooling, then pull the pinned runtime dep (dkjson)
 deps:
     luarocks install luafilesystem
-    luarocks install luacheck
+    luarocks install luacheck 1.2.0   # pinned: keep in lock-step with CI (the gate is 0 warnings)
     luarocks install busted
     luarocks install luacov
     lua build/build.lua --fetch-deps
@@ -32,7 +32,7 @@ _deps:
 lint:
     luacheck src spec scripts
 
-# run the unit + accuracy tests
+# run the unit tests
 test: _deps
     busted
 
@@ -42,40 +42,22 @@ coverage: _deps
     luacov
     @tail -n 25 luacov.report.out
 
-# print the species-ID accuracy report over the offline fixture corpus
-accuracy: _deps
-    lua scripts/accuracy.lua
-
-# record a new fixture from a real image (see scripts/record-fixture.lua)
-record image *FLAGS: _deps
-    lua scripts/record-fixture.lua {{image}} {{FLAGS}}
-
-# capture REAL Google Lens output for the ground-truth corpus, for offline replay.
-# Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.
-capture *FLAGS:
-    bash ./capture.sh {{FLAGS}}
-
-# integration + regression tests for the interactive challenge-handling flow (fake
-# local Google, no network). Needs Node + Chrome + `cd scripts/lens && npm i`. Not
-# in `just check`.
+# drive the REAL assist helper against a local fake Google (no network). Needs Node +
+# Chrome + `cd scripts/lens && npm i`. Not in `just check`.
 lens-test:
-    node scripts/lens/test/integration.test.js
-    node scripts/lens/test/overlay-frame.test.js
-
-# measure REAL Google Lens accuracy via the browser helper (writes nothing).
-# Run on a residential network; needs `cd scripts/lens && npm i` + Chrome + curl.
-live-accuracy *FLAGS: _deps
-    lua scripts/live-accuracy.lua {{FLAGS}}
+    cd scripts/lens && npm test
 
 # compose the bundle into output/dist (version from VERSION / tag), zip + checksums
 build:
     lua build/build.lua
 
-# build, then symlink the bundle into the local Lightroom Modules folder
+# build, then install a full plugin copy into ~/Documents/Lightroom Plugins
+# (override with LR_PLUGIN_DIR). First run: Add it in Plug-in Manager; after an
+# update: click "Reload Plug-in".
 install:
     lua build/build.lua --install
 
-# remove the Lightroom Modules symlink
+# remove the installed plugin copy (also remove it from Plug-in Manager if Added)
 uninstall:
     lua build/build.lua --uninstall
 

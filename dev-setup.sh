@@ -51,7 +51,7 @@ export PATH="$ENV_DIR/bin:$PATH"
 
 say "installing dev rocks (luafilesystem luacheck busted luacov)"
 luarocks install luafilesystem
-luarocks install luacheck
+luarocks install luacheck 1.2.0   # pinned: the gate is "0 warnings" — keep in lock-step with CI
 luarocks install busted
 luarocks install luacov
 

@@ -2,8 +2,9 @@
 --[[----------------------------------------------------------------------------
 build/build.lua
 Composes the installable SpeciesTagger.lrplugin bundle in output/dist/ from src/,
-stamps the version into Info.lua, zips it, writes checksums, and (optionally)
-installs it into the local Lightroom Modules folder for development.
+stamps the version into Info.lua, zips it, writes checksums, and (optionally,
+--install) copies a full standalone plugin into ~/Documents/Lightroom Plugins
+(override with LR_PLUGIN_DIR) to Add/Reload in Plug-in Manager for development.
 
 Only dependency is luafilesystem (`luarocks install luafilesystem`). The plugin's
 single third-party runtime dependency (dkjson) is pulled via LuaRocks at build

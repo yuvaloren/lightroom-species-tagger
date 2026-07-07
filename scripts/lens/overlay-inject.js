@@ -1,45 +1,85 @@
 /*----------------------------------------------------------------------------
 scripts/lens/overlay-inject.js
-The interactive control bar ("complete any Google check, then click Parse results")
-injected into the page during the challenge-handling flow, factored out of
-lens-search.js so it can be unit-tested directly (test/overlay-frame.test.js).
+The assistive control bar injected into the Google Lens page: a bar docked at the
+BOTTOM (so it never covers Google's own top bar) with an "m of n" counter and the Tag
++ Skip buttons. YOU read Google's real results; pressing Tag records ONLY
+window.getSelection() — the species name you highlighted. Nothing on the page is
+scraped, and there is no keyword box of ours (use Google's own search box to refine).
 
-This function is handed to page.evaluateOnNewDocument(), so puppeteer serialises it
-and runs it in the browser on EVERY frame. It must therefore be self-contained —
-reference only browser globals (window, document) and the exposed handlers BY NAME
-(window.__lensParse / window.__lensCancel), never via a Node closure.
+Handed to page.evaluateOnNewDocument(assistOverlayInjector, pos), so it is serialised
+and runs in the browser on every document. It communicates by setting page globals
+(window.__stTag / window.__stSkip) that the Node side POLLS — no exposeFunction, so it
+keeps working when the helper reconnects to a reused window/tab across photos. Builds
+all UI with createElement + textContent (never innerHTML). Top frame only: the same
+guard as before keeps it out of a same-origin reCAPTCHA iframe.
 ----------------------------------------------------------------------------*/
-function overlayInjector() {
-  // Only inject into the TOP frame. evaluateOnNewDocument runs in every frame, and
-  // Google's reCAPTCHA image challenge is a same-origin google.com iframe — without
-  // this guard the bar is added inside the challenge popup too (a second, unwanted
-  // header that clips the captcha). The control belongs only on the page.
+function assistOverlayInjector(pos) {
   if (window.top !== window.self) return;
-  const add = () => {
-    if (!document.body || document.getElementById('__lens_overlay')) return;
-    const bar = document.createElement('div');
-    bar.id = '__lens_overlay';
-    bar.style.cssText = 'position:fixed;top:0;left:0;right:0;z-index:2147483647;background:#202124;color:#fff;font:14px sans-serif;padding:8px 12px;display:flex;gap:8px;align-items:center;box-shadow:0 2px 8px rgba(0,0,0,.4)';
-    const msg = document.createElement('span');
-    msg.style.cssText = 'flex:1';
-    msg.textContent = 'Species Tagger: complete any Google check, then click “Parse results”.';
-    bar.appendChild(msg);
-    const mk = (label, bg, fn) => {
-      const b = document.createElement('button');
-      b.textContent = label;
-      b.style.cssText = 'padding:6px 12px;border:0;border-radius:4px;cursor:pointer;background:' + bg + ';color:#fff';
-      b.onclick = () => { try { window[fn](); } catch (e) {} };
-      return b;
+  var add = function () {
+    if (!document.body || document.getElementById('__lens_assist')) return;
+    var bar = document.createElement('div');
+    bar.id = '__lens_assist';
+    bar.style.cssText = 'position:fixed;bottom:0;left:0;right:0;z-index:2147483647;background:#1b4535;color:#eef3ee;font:13px system-ui,-apple-system,sans-serif;padding:10px 16px;display:flex;gap:12px;align-items:center;flex-wrap:wrap;border-top:2px solid #e6a23c;box-shadow:0 -4px 14px rgba(0,0,0,.3)';
+
+    var brand = document.createElement('strong');
+    brand.textContent = '🪶 Species Tagger';
+    brand.style.cssText = 'white-space:nowrap';
+    bar.appendChild(brand);
+
+    if (pos) {
+      var counter = document.createElement('span');
+      counter.textContent = pos;                       // e.g. "Photo 2 of 5"
+      counter.style.cssText = 'color:#cfe0d4;white-space:nowrap;background:rgba(255,255,255,.09);padding:3px 10px;border-radius:999px';
+      bar.appendChild(counter);
+    }
+
+    var spacer = document.createElement('span');
+    spacer.style.cssText = 'flex:1';
+    bar.appendChild(spacer);
+
+    var hint = document.createElement('span');
+    hint.textContent = 'Highlight the species Latin name and press';
+    hint.style.cssText = 'color:#a8c4b4;white-space:nowrap';
+    bar.appendChild(hint);
+
+    var tagBtn = document.createElement('button');
+    tagBtn.id = '__lens_tag';
+    tagBtn.textContent = '🏷️ Tag';
+    tagBtn.style.cssText = 'background:#e6a23c;color:#1d1405;border:0;border-radius:999px;padding:8px 18px;font-weight:700;cursor:pointer;font:inherit;transition:background .12s,color .12s';
+    tagBtn.onclick = function () {
+      if (tagBtn.disabled) return;
+      var sel = (window.getSelection ? String(window.getSelection()) : '').replace(/^\s+|\s+$/g, '');
+      if (!sel) {
+        // nothing highlighted yet — nudge instead of doing nothing silently
+        tagBtn.textContent = 'Highlight a name first';
+        setTimeout(function () { if (!tagBtn.disabled) tagBtn.textContent = '🏷️ Tag'; }, 1500);
+        return;
+      }
+      // Instant feedback the moment you press: the tag is registered and the plugin is
+      // resolving it + moving on (Node polls window.__stTag, which can take a beat).
+      tagBtn.textContent = '⏳ Tagging…';
+      tagBtn.style.background = '#2f7d55';   // amber "ready" -> green "working"
+      tagBtn.style.color = '#eafff2';
+      tagBtn.style.cursor = 'default';
+      tagBtn.disabled = true;
+      window.__stTag = sel;
     };
-    bar.appendChild(mk('Parse results', '#1a73e8', '__lensParse'));
-    bar.appendChild(mk('Cancel', '#d93025', '__lensCancel'));
+    bar.appendChild(tagBtn);
+
+    var skipBtn = document.createElement('button');
+    skipBtn.id = '__lens_skip';
+    skipBtn.textContent = 'Skip';
+    skipBtn.style.cssText = 'background:transparent;color:#a8c4b4;border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:7px 12px;cursor:pointer;font:inherit';
+    skipBtn.onclick = function () { window.__stSkip = true; };
+    bar.appendChild(skipBtn);
+
     document.body.appendChild(bar);
   };
   if (document.body) add();
   else {
     document.addEventListener('DOMContentLoaded', add);
-    document.addEventListener('readystatechange', () => { if (document.readyState !== 'loading') add(); });
+    document.addEventListener('readystatechange', function () { if (document.readyState !== 'loading') add(); });
   }
 }
 
-module.exports = { overlayInjector };
+module.exports = { assistOverlayInjector };

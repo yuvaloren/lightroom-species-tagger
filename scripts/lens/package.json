@@ -2,8 +2,16 @@
   "name": "lens-search",
   "version": "0.1.0",
   "private": true,
-  "description": "Google Lens species search via the user's installed Chrome (no paid API). Used by the Lightroom Species Tagger for the Lens backend and by build-corpus --live.",
-  "bin": { "lens-search": "lens-search.js" },
+  "description": "Assistive Google Lens helper for the Lightroom Species Tagger — opens Lens in the user’s Chrome so they can highlight and tag a species (no paid API, no scraping).",
+  "bin": {
+    "lens-search": "lens-search.js"
+  },
+  "engines": {
+    "node": ">=18"
+  },
+  "scripts": {
+    "test": "node test/integration.test.js"
+  },
   "dependencies": {
     "puppeteer-core": "^23"
   }

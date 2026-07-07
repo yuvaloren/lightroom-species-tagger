@@ -27,18 +27,19 @@ luacov.report.out
 # Never-commit user data (real photos / captures can carry personal EXIF or tokens).
 # ─────────────────────────────────────────────────────────────────────────────
 
-# Live test images are your own photos — never committed. Drop originals into
-# spec/fixtures/images/ to enable live recording / live-accuracy runs.
+# Test images are your own photos — never committed (they can carry personal EXIF).
 /spec/fixtures/images/*
 !/spec/fixtures/images/.gitkeep
 !/spec/fixtures/images/README.md
 
-# Raw Google Lens HTML dumped by `build-corpus.lua --live` (for auditing captures) —
-# large and may carry transient session tokens; never committed.
-/spec/fixtures/lens/raw/
-
-# Cached live Google Lens captures for offline accuracy tuning (from real photos).
+# Local-only leftovers from earlier tooling — NEVER commit: raw Google HTML can carry
+# session tokens, and cached captures include your own photos. (Regenerable local cache.)
+/spec/fixtures/lens/
 /spec/fixtures/live/
 
 # macOS
 .DS_Store
+
+# The maintainer's private working scratchpad — kept locally, never shipped in the
+# public repo. Outward-facing plans live in ROADMAP.md; bugs/ideas go to GitHub issues.
+/Issues.txt

@@ -1,0 +1,76 @@
+name: Bug report
+description: Something misbehaves, crashes, or mis-tags.
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Thanks for the report! A few specifics make bugs much faster to fix.
+        Please don't paste real photos, EXIF, or session tokens.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened
+      description: What did you expect, and what happened instead?
+      placeholder: I ran "Identify and Tag Species" on 3 reef photos and…
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      value: |
+        1.
+        2.
+        3.
+    validations:
+      required: true
+  - type: dropdown
+    id: area
+    attributes:
+      label: Which part?
+      options:
+        - The Lens window (doesn't open, challenges, the Tag/Skip bar)
+        - Tagging / keywords (wrong or missing keyword, name not found in GBIF)
+        - Settings / install / build
+        - Other / not sure
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: Plugin version
+      description: From Plug-in Manager ▸ Species Tagger (or the VERSION file).
+      placeholder: "0.1.0"
+    validations:
+      required: true
+  - type: dropdown
+    id: os
+    attributes:
+      label: Operating system
+      options:
+        - macOS
+        - Windows
+        - Linux
+    validations:
+      required: true
+  - type: textarea
+    id: env
+    attributes:
+      label: Lightroom, Node, and Chrome versions
+      placeholder: "Lightroom Classic 13.2 · node v20.11 · Chrome 126"
+  - type: textarea
+    id: log
+    attributes:
+      label: Relevant log output
+      description: >
+        The plugin writes a log to Lightroom's Documents/ logs folder. Paste the
+        relevant lines (they're redacted for keys/cookies). This will be formatted as code.
+      render: shell
+  - type: checkboxes
+    id: checks
+    attributes:
+      label: Before you file
+      options:
+        - label: I'm on a residential network (datacenter/VPN IPs get challenged by Google — see the README).
+        - label: I searched existing issues and this isn't a duplicate.

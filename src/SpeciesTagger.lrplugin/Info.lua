@@ -20,10 +20,6 @@ return {
 			title = LOC '$$$/SpeciesTagger/Menu=Identify and Tag Species…',
 			file = 'SpeciesTaggerMenuItem.lua',
 		},
-		{
-			title = LOC '$$$/SpeciesTagger/ReparseMenu=Re-tag from open Lens tabs…',
-			file = 'ReparseMenuItem.lua',
-		},
 	},
 
 	VERSION = { major = 0, minor = 1, revision = 0, build = 0 },
