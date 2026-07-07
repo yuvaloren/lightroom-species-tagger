@@ -101,7 +101,7 @@ end
 -- decision ('apply'|'review') and a one-line summary. Shared by the main run loop
 -- and the re-parse action so both tag identically.
 function M.applyResult( catalog, photo, result, cfg )
-	local keyCfg = { mode = cfg.keywordMode, rootKeyword = cfg.rootKeyword, flatRoot = cfg.flatRoot }
+	local keyCfg = { mode = cfg.keywordMode, flatRoot = cfg.flatRoot }
 	local decision, line = 'review', nil
 	catalog:withWriteAccessDo( 'Tag species', function()
 		if result.decision == 'apply' then
@@ -135,18 +135,6 @@ local function optsFor( _backend, _cfg, _bytes, file )
 	return { imageFile = file }
 end
 
--- Get observations for one photo from the configured provider. The Lens helper
--- uploads the image file, so we render a temp JPEG on disk (cleaned up afterwards).
--- Capture GPS from the catalog (the rendered preview has no EXIF), so Lens can
--- favour species that occur where the photo was actually taken.
-local function photoGps( photo )
-	local ok, gps = pcall( function() return photo:getRawMetadata( 'gps' ) end )
-	if ok and type( gps ) == 'table' and gps.latitude and gps.longitude then
-		return gps.latitude, gps.longitude
-	end
-	return nil
-end
-
 -- The photo's IPTC place fields (sublocation, city, state, country) as a
 -- "City, State, Country" string, or nil. Used two ways: as a Lens-search text
 -- refinement (so location is a keyword), and — when there are no GPS coords — as a
@@ -161,13 +149,16 @@ local function photoPlace( photo )
 	return table.concat( parts, ', ' )
 end
 
--- The Lens-search text refinement (extra keywords + the location, framed with "in "
--- so Lens treats the place as context, not subject) lives in the pure, tested
--- LensQuery module. See src/shared/LensQuery.lua.
+-- How the run's hints reach the Lens search lives in the pure, tested LensQuery
+-- module (src/shared/LensQuery.lua). Location is delivered as the natural-language
+-- "identify picture using location: <place>" TEXT instruction, and only on the
+-- location-assisted pass — see M.observe.
 
--- Exposed (M.observe) so the "Debug Lens" action can reuse the EXACT render +
--- upload path a normal tagging run uses, just with a debug-enabled lensSearch.
-function M.observe( photo, cfg, deps )
+-- Exposed (M.observe) so a caller can reuse the EXACT render + upload path a normal
+-- tagging run uses (e.g. the location-assisted retry).
+-- hints = { other = <keywords>, location = <place> }; location present => the
+-- location-assisted pass (adds "identify picture using location: <place>").
+function M.observe( photo, cfg, deps, hints )
 	local bytes, err = jpegBytes( photo, cfg.maxEdge )
 	if not bytes then return nil, err end
 
@@ -181,13 +172,18 @@ function M.observe( photo, cfg, deps )
 
 	local opts = optsFor( cfg.backend, cfg, bytes, file )
 	if cfg.backend == 'lens' then
-		opts.lat, opts.lng = photoGps( photo )
-		local placeText = photoPlace( photo )
-		-- No GPS: hand the place name to the helper to geocode for browser geolocation.
-		if not opts.lat then opts.place = placeText end
-		-- Location + the run's extra keywords also go into the search as text
-		-- (location prefixed with "in " so Lens treats it as context, not subject).
-		opts.query = LensQuery.build( cfg.lensExtraKeywords, placeText )
+		-- Location is NOT sent as browser geolocation (measured: geolocation makes Lens's
+		-- AI Overview hedge to genus/common and drop the binomial) and NOT on the first
+		-- pass (it degrades easy, web-matchable photos). It is delivered as the
+		-- "identify picture using location:" TEXT instruction ONLY when hints.location is set —
+		-- the location-assisted retry — which is decisive for ambiguous subjects.
+		local other = hints and hints.other
+		local locationText = hints and hints.location
+		if locationText and locationText ~= '' then
+			opts.query = LensQuery.compose { other = other, location = locationText, strategy = 'identify-location' }
+		else
+			opts.query = LensQuery.compose { other = other, strategy = 'none' }
+		end
 		-- Identity for the keep-open tab, so a later "Re-parse" can re-tag this photo.
 		local okp, p = pcall( function() return photo:getRawMetadata( 'path' ) end )
 		opts.photoPath = okp and p or nil
@@ -231,34 +227,50 @@ local function firstRunWelcome()
 	}, '\n' ), 'info' )
 end
 
--- Ask for extra keywords to fold into this run's Lens search (issue 2). Prefilled
--- with the last entry. Returns the string (possibly empty) or nil if cancelled.
-local function promptExtraKeywords( prefs )
+-- Ask for two optional hints for this run: a LOCATION (used only for the
+-- location-assisted retry) and OTHER identifying keywords. Prefilled with the last
+-- entries. Returns { location=, other= } (either may be '') or nil if cancelled.
+local function promptHints( prefs )
 	local result
-	LrFunctionContext.callWithContext( 'speciesTagger.keywords', function( ctx )
+	LrFunctionContext.callWithContext( 'speciesTagger.hints', function( ctx )
 		local props = LrBinding.makePropertyTable( ctx )
-		props.kw = prefs.lastExtraKeywords or ''
+		props.location = prefs.lastLocationHint or ''
+		props.other = prefs.lastOtherKeywords or ''
 		local f = LrView.osFactory()
+		local labelW = LrView.share 'st_hint_label'
 		local contents = f:column {
 			bind_to_object = props, spacing = f:control_spacing(),
 			f:static_text {
-				title = 'Extra keywords to add to the Google Lens search (this run):',
-				width = 460,
+				title = 'Two optional hints for this run — both may be left blank:',
+				width = 500,
 			},
-			f:edit_field { value = LrView.bind 'kw', width_in_chars = 44, immediate = true },
+			f:row {
+				f:static_text { title = 'Location:', width = labelW, alignment = 'right' },
+				f:edit_field { value = LrView.bind 'location', width_in_chars = 42, immediate = true },
+			},
 			f:static_text {
-				title = 'Optional — added to every selected photo’s search alongside its location. ' ..
-					'e.g. “juvenile”, “reef”, a place name. Leave blank for a plain image search.',
-				wrap = true, width = 460, height_in_lines = 2,
+				title = 'Where the photo was taken — e.g. “Año Nuevo State Park”. Used only if a photo ' ..
+					'can’t be identified on its own; it’s then re-tried as “identify picture using location: …”, ' ..
+					'which disambiguates lookalike species.',
+				wrap = true, width = 500, height_in_lines = 3,
+			},
+			f:row {
+				f:static_text { title = 'Other keywords:', width = labelW, alignment = 'right' },
+				f:edit_field { value = LrView.bind 'other', width_in_chars = 42, immediate = true },
+			},
+			f:static_text {
+				title = 'Any other identifying detail added to the search — e.g. “juvenile”, “in flight”, ' ..
+					'“nudibranch”. Leave blank for a plain image search.',
+				wrap = true, width = 500, height_in_lines = 2,
 			},
 		}
 		local btn = LrDialogs.presentModalDialog {
-			title = 'Species Tagger — Extra keywords',
+			title = 'Species Tagger — Search hints',
 			contents = contents,
-			actionVerb = 'Search',
+			actionVerb = 'Go',
 			cancelVerb = 'Cancel',
 		}
-		if btn == 'ok' then result = props.kw or '' end
+		if btn == 'ok' then result = { location = props.location or '', other = props.other or '' } end
 	end )
 	return result
 end
@@ -288,12 +300,14 @@ function M.run( _ )
 		prefs.firstRunDone = true
 	end
 
-	-- Ask for extra keywords to include in the Lens search (issue 2). Cancel aborts.
-	if cfg.promptExtraKeywords then
-		local kw = promptExtraKeywords( prefs )
-		if kw == nil then return end
-		cfg.lensExtraKeywords = kw
-		prefs.lastExtraKeywords = kw
+	-- Ask for the run's two optional hints (location + other keywords). Cancel aborts.
+	if cfg.promptHints then
+		local h = promptHints( prefs )
+		if h == nil then return end
+		cfg.locationHint = h.location
+		cfg.otherKeywords = h.other
+		prefs.lastLocationHint = h.location
+		prefs.lastOtherKeywords = h.other
 	end
 
 	local http = Http.lrAdapter()
@@ -309,7 +323,6 @@ function M.run( _ )
 	if Providers.get( cfg.backend ).usesLensHelper then
 		lensSearch = Http.lensSearchAdapter {
 			helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
-			nodePath = cfg.nodePath,
 			interactive = interactive,
 			interactiveState = interactiveState,
 			keepOpen = cfg.lensKeepOpen,
@@ -322,10 +335,22 @@ function M.run( _ )
 			LrDialogs.showBezel( 'A Chrome window will open for each photo to show Google’s page.' )
 		end
 	end
+	-- With "Keep the browser open", the location-assisted retry REUSES this photo's
+	-- existing tab (adds the location text in place) instead of opening a second one.
+	local refineSearch
+	if Providers.get( cfg.backend ).usesLensHelper and cfg.lensKeepOpen then
+		refineSearch = Http.lensRefineAdapter {
+			helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
+		}
+	end
 	local providerDeps = { http = http, lensSearch = lensSearch }
 	local resolveCache = {} -- shared GBIF cache for the whole run
 	local resolveDeps = { http = http, cache = resolveCache }
 	local identCfg = { autoApplyThreshold = cfg.autoApplyThreshold }
+	local function identify( obs )
+		return Identify.run( obs, { resolve = function( c ) return Taxonomy.resolve( c, resolveDeps ) end }, identCfg )
+	end
+	local lensParse = Providers.get( cfg.backend ).parse -- {overview,strings} -> observations
 
 	local progress = LrProgressScope { title = 'Identifying species…' }
 	progress:setCancelable( true )
@@ -340,7 +365,8 @@ function M.run( _ )
 		progress:setPortionComplete( i - 1, #photos )
 		progress:setCaption( fileName( photo ) )
 
-		local obs, err = M.observe( photo, cfg, providerDeps )
+		-- Pass 1: identify with no location (best for easy, web-matchable photos).
+		local obs, err = M.observe( photo, cfg, providerDeps, { other = cfg.otherKeywords } )
 		if err == '__lens_cancelled__' then
 			nSkipped = nSkipped + 1
 			lines[ #lines + 1 ] = '⊘ ' .. fileName( photo ) .. ' — skipped (Google check cancelled)'
@@ -356,9 +382,39 @@ function M.run( _ )
 			lines[ #lines + 1 ] = '✗ ' .. fileName( photo ) .. ' — ' .. tostring( err )
 			log:warn( 'observe failed: ' .. Log.redact( tostring( err ) ) )
 		else
-			local result = Identify.run( obs, {
-				resolve = function( c ) return Taxonomy.resolve( c, resolveDeps ) end,
-			}, identCfg )
+			local result = identify( obs )
+			-- Pass 2 (location-assisted retry): if the photo isn't confidently identified
+			-- and we have a place — the run's location hint, else the photo's IPTC place —
+			-- try once more with "identify picture using location: <place>", which disambiguates
+			-- lookalike species (e.g. northern elephant seals at Año Nuevo). Keep whichever
+			-- pass identifies. Skipped in keyword-only runs (no place available).
+			if result.decision ~= 'apply' and cfg.locationAssistRetry and not progress:isCanceled() then
+				local place = cfg.locationHint
+				if not place or place == '' then place = photoPlace( photo ) end
+				if place and place ~= '' then
+					LrTasks.sleep( 2 + math.random() * 3 ) -- space the extra Lens hit out
+					local obs2, err2
+					if refineSearch then
+						-- Keep-open: reuse this photo's tab, adding the location text in place.
+						local okp, ppath = pcall( function() return photo:getRawMetadata( 'path' ) end )
+						local q = LensQuery.compose { other = cfg.otherKeywords, location = place, strategy = 'identify-location' }
+						local d = refineSearch( okp and ppath or nil, q )
+						if d then obs2 = lensParse( d ) end
+					else
+						-- No kept-open tab to reuse: do a fresh location-assisted search.
+						obs2, err2 = M.observe( photo, cfg, providerDeps, { other = cfg.otherKeywords, location = place } )
+					end
+					if err2 == '__lens_challenged__' then
+						challenged = true
+						nSkipped = nSkipped + 1
+						lines[ #lines + 1 ] = '⊘ ' .. fileName( photo ) .. ' — Google challenge on location retry; stopped here'
+						break
+					elseif obs2 then
+						local r2 = identify( obs2 )
+						if r2.decision == 'apply' then result = r2 end
+					end
+				end
+			end
 			local decision, line = M.applyResult( catalog, photo, result, cfg )
 			if decision == 'apply' then nApplied = nApplied + 1 else nReview = nReview + 1 end
 			lines[ #lines + 1 ] = line
@@ -375,19 +431,28 @@ function M.run( _ )
 
 	progress:done()
 
-	local summary = string.format(
-		'Tagged %d, flagged %d for review, skipped %d, %d error%s (of %d).\n\n%s',
-		nApplied, nReview, nSkipped, nError, nError == 1 and '' or 's', #photos,
-		table.concat( lines, '\n' ) )
+	-- No modal summary on a normal run — the results are right there in the Keyword
+	-- List and the needs-review tag. A brief bezel is enough; the per-photo detail
+	-- goes to the plugin log for debugging. A modal is kept ONLY when it's actionable.
+	local bezel = string.format( 'Species Tagger: tagged %d, review %d%s%s',
+		nApplied, nReview,
+		nSkipped > 0 and ( ', skipped ' .. nSkipped ) or '',
+		nError > 0 and ( ', ' .. nError .. ' error' .. ( nError == 1 and '' or 's' ) ) or '' )
+	log:info( 'run complete — ' .. bezel .. '\n' .. table.concat( lines, '\n' ) )
+	LrDialogs.showBezel( bezel, 4 )
+
 	if challenged then
-		summary = summary .. '\n\n⚠ Google rate-limited this network (the “unusual traffic” ' ..
-			'check). The block clears on its own after a while. To continue now: wait and ' ..
-			'retry later, switch to a different network (e.g. a phone hotspot), run a single ' ..
-			'photo (a Chrome window opens so you can solve the check by hand), or switch to ' ..
-			'the Pl@ntNet / Vision backend in the plug-in settings.'
+		LrDialogs.message( 'Species Tagger',
+			'Google rate-limited this network (the “unusual traffic” check). The block clears on ' ..
+			'its own after a while. To continue now: wait and retry later, switch to a different ' ..
+			'network (e.g. a phone hotspot), run a single photo (a Chrome window opens so you can ' ..
+			'solve the check by hand), or switch to the Pl@ntNet / Vision backend in the plug-in settings.',
+			'warning' )
+	elseif nError > 0 and nApplied == 0 then
+		LrDialogs.message( 'Species Tagger', string.format(
+			'Nothing could be tagged (%d error%s of %d). See the plugin log for details.',
+			nError, nError == 1 and '' or 's', #photos ), 'warning' )
 	end
-	LrDialogs.message( 'Species Tagger', summary,
-		( challenged or ( nError > 0 and nApplied == 0 ) ) and 'warning' or 'info' )
 end
 
 return M

@@ -193,7 +193,11 @@ const cancel = () => out({ ok: false, cancelled: true, strings: [] });
 // photo it's for), so corrected searches re-tag their photos in one batch pass
 // (issue: "re-parse any open windows still on google lens").
 const REPARSE = process.argv.includes('--reparse');
-if (!REPARSE && (!img || !fs.existsSync(img))) fail('image not found: ' + img);
+// Refine mode: don't upload — REUSE this photo's already-open keep-open tab, add the
+// LENS_QUERY text to its search in place (multisearch) and re-scrape. Used for the
+// location-assisted retry so it reuses the same tab instead of opening a second one.
+const REFINE = process.argv.includes('--refine');
+if (!REPARSE && !REFINE && (!img || !fs.existsSync(img))) fail('image not found: ' + img);
 
 // Google UI chrome / boilerplate to drop (the GBIF step would reject it anyway,
 // but trimming keeps the candidate set small).
@@ -241,10 +245,14 @@ async function prepPage(page, cookies, headed) {
 }
 
 // Navigate to the results URL and give the JS a chance to render (matches + the
-// later-arriving AI Overview).
-async function loadResults(page, url) {
+// later-arriving AI Overview). opts.requireAi: wait harder for the AI Overview and do
+// NOT bail on the anchors-only heuristic — used by the location-assisted refine, where
+// the AI Overview is the whole point.
+async function loadResults(page, url, opts) {
+  opts = opts || {};
   await page.goto(url, { waitUntil: 'networkidle2', timeout: 45000 }).catch(() => {});
-  for (let i = 0; i < 15; i++) {
+  const maxIter = opts.requireAi ? 22 : 15;
+  for (let i = 0; i < maxIter; i++) {
     const r = await page.evaluate(() => ({
       anchors: document.querySelectorAll('a[href]').length,
       ai: /AI Overview/i.test(document.body ? document.body.innerText : ''),
@@ -252,7 +260,7 @@ async function loadResults(page, url) {
     })).catch(() => ({ anchors: 0, ai: false, challenged: false }));
     if (r.challenged) break;             // a challenge won't resolve by waiting — assess + escalate
     if (r.ai) break;                     // AI Overview rendered — results are ready
-    if (r.anchors > 40 && i >= 6) break; // lots of anchors, no AI overview coming
+    if (!opts.requireAi && r.anchors > 40 && i >= 6) break; // lots of anchors, no AI overview coming
     await sleep(1000);
   }
 }
@@ -459,6 +467,51 @@ async function reparse() {
   out({ ok: true, reparsed: true, tabs: tabs });
 }
 
+// Refine THIS photo's existing keep-open tab in place (the location-assisted retry):
+// connect to the window, find the tab for LENS_PHOTO_PATH (else the most-recent Lens
+// tab), add the LENS_QUERY text to its current results URL (multisearch) and reload —
+// no re-upload, no new tab, the SAME tab is reused — then scrape. Returns
+// { ok, refined, overview, strings }. Requires keep-open mode + a prior search.
+async function refine() {
+  if (!QUERY) { fail('refine needs LENS_QUERY (the location text)'); return; }
+  let browser;
+  try { browser = await puppeteer.connect({ browserURL: 'http://127.0.0.1:' + TABS_PORT, defaultViewport: null }); }
+  catch (_) { fail('no open Lens window to refine — needs “Keep the browser open”.'); return; }
+  let target = null, best = -1;
+  for (const p of await browser.pages()) {
+    let info;
+    try { info = await p.evaluate(() => ({ url: location.href, last: window.__stLastActive || 0, photoPath: window.__stPhotoPath || '' })); }
+    catch (_) { continue; }
+    if (!info.url || /^about:blank/.test(info.url)) continue;
+    if (!/google\.|lens\.|[?&]vsrid=|\/(search|results)\b/.test(info.url)) continue;
+    // strongly prefer this photo's own tab; otherwise fall back to the most-recent Lens tab
+    const rank = (PHOTO_PATH && info.photoPath === PHOTO_PATH ? 1e15 : 0) + info.last;
+    if (rank > best) { best = rank; target = { page: p, url: info.url }; }
+  }
+  if (!target) { try { browser.disconnect(); } catch (_) {} fail('no open Lens tab found to refine.'); return; }
+  // strip any existing q= text refinement, then append the new one, and reload the tab
+  let url = target.url.replace(/([?&])q=[^&]*&?/, '$1').replace(/[?&]$/, '');
+  url += (url.includes('?') ? '&' : '?') + 'q=' + encodeURIComponent(QUERY);
+  dbg('refine: reusing tab -> ' + url);
+  try {
+    try { await target.page.bringToFront(); } catch (_) {}
+    // Re-stamp so a later --reparse still maps this tab to its photo (the Pass-1
+    // injector was registered by a different process and is dropped on reload).
+    try { await target.page.evaluateOnNewDocument(keepOpenBarInjector, PHOTO_PATH, PHOTO_NAME); } catch (_) {}
+    // Force a FULL reload: a query-only nav on the already-loaded Lens SPA does NOT
+    // regenerate the AI Overview (Google treats it as an in-page update), so blank the
+    // tab first — then wait specifically for the AI Overview.
+    await target.page.goto('about:blank').catch(() => {});
+    await loadResults(target.page, url, { requireAi: true });
+    try { await target.page.evaluate(() => { const o = document.getElementById('__lens_keepbar'); if (o) o.remove(); }); } catch (_) {}
+    const data = await scrapeRaw(target.page).catch(() => ({ strings: [], overview: '' }));
+    const seen = new Set(); const clean = [];
+    for (const s of data.strings) { const k = s.toLowerCase(); if (STOP.has(k) || seen.has(k)) continue; seen.add(k); clean.push(s); }
+    try { browser.disconnect(); } catch (_) {}             // never kill the user's window
+    out({ ok: true, refined: true, overview: data.overview || '', strings: clean.slice(0, 80) });
+  } catch (e) { try { browser.disconnect(); } catch (_) {} fail('refine failed: ' + e.message); }
+}
+
 // Launch a visible Chrome we DON'T own (detached + connect). puppeteer only kills
 // browsers it *launched*, never connect()ed ones, so we control teardown explicitly.
 async function openDetachedChrome() {
@@ -571,6 +624,7 @@ async function emit(page, browser, escProc) {
 
 (async () => {
   if (REPARSE) { await reparse(); return; }               // scrape the open tab; no upload
+  if (REFINE) { await refine(); return; }                 // add location to this photo's tab; no upload
   if (!hasGeo && place) {
     const c = await geocode(place);
     if (c) { lat = c.lat; lng = c.lng; hasGeo = true; }

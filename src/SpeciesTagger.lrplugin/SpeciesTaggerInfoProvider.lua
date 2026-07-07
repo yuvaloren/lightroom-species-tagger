@@ -37,29 +37,15 @@ function M.sectionsForTopOfDialog( f, _ )
 		{
 			title = 'Recognition (Google Lens)',
 			f:static_text {
-				title = 'Species are recognised with Google Lens — free, no API key. The plugin opens ' ..
-					'your installed Google Chrome (a visible window, so you see Google’s real page) to run ' ..
-					'a Lens image search, then resolves the names through the GBIF taxonomy backbone. ' ..
-					'It needs Node.js + Google Chrome installed on this machine (macOS, Linux or Windows). ' ..
-					'See docs/PRIVACY.md for exactly what leaves your machine.',
-				wrap = true, width = 540, height_in_lines = 4,
+				title = 'Free — no API key. Opens your installed Google Chrome to run a Lens image search, ' ..
+					'then resolves names through GBIF. Needs Node.js + Chrome. See docs/PRIVACY.md.',
+				wrap = true, width = 540, height_in_lines = 2,
 			},
 			f:row {
 				f:checkbox {
-					title = 'Keep the browser open (a new tab per photo) so you can refine the search and re-parse it',
+					title = 'Keep the browser open (a tab per photo) to refine a search and re-parse it',
 					value = bind 'lensKeepOpen',
 				},
-			},
-			f:row {
-				f:static_text { title = 'node path:', width = labelW, alignment = 'right' },
-				f:edit_field { value = bind 'nodePath', width_in_chars = 40 },
-				f:static_text { title = '(blank = auto-detect)' },
-			},
-			f:static_text {
-				title = 'Set node path only if Lightroom can’t find Node on its own (its GUI gets a minimal ' ..
-					'PATH) — e.g. /opt/homebrew/bin/node, /usr/local/bin/node, or ' ..
-					'C:\\Program Files\\nodejs\\node.exe.',
-				wrap = true, width = 540, height_in_lines = 2,
 			},
 		},
 		{
@@ -76,11 +62,6 @@ function M.sectionsForTopOfDialog( f, _ )
 				},
 			},
 			f:row {
-				f:static_text { title = 'Hierarchy root:', width = labelW, alignment = 'right' },
-				f:edit_field { value = bind 'rootKeyword', width_in_chars = 20 },
-				f:static_text { title = '(optional parent, e.g. Wildlife)' },
-			},
-			f:row {
 				f:static_text { title = 'Auto-tag confidence:', width = labelW, alignment = 'right' },
 				f:slider { value = bind 'autoApplyThreshold', min = 0.30, max = 0.95, width = 200 },
 				f:static_text {
@@ -90,9 +71,8 @@ function M.sectionsForTopOfDialog( f, _ )
 				},
 			},
 			f:static_text {
-				title = 'How confident the identification must be (0–1) before keywords are applied ' ..
-					'automatically. Below this, the photo is only flagged with the needs-review tag ' ..
-					'instead of tagged. Higher = fewer wrong tags, but more photos left for review.',
+				title = 'Minimum confidence (0–1) to auto-apply keywords; below it the photo just gets the ' ..
+					'needs-review tag. Higher = fewer wrong tags, more photos left for review.',
 				wrap = true, width = 540, height_in_lines = 2,
 			},
 			f:row {
@@ -104,9 +84,20 @@ function M.sectionsForTopOfDialog( f, _ )
 			},
 			f:row {
 				f:checkbox {
-					title = 'Ask for extra keywords at the start of each run (added to the Lens search)',
-					value = bind 'promptExtraKeywords',
+					title = 'Ask for search hints (location + other keywords) at the start of each run',
+					value = bind 'promptHints',
 				},
+			},
+			f:row {
+				f:checkbox {
+					title = 'Location-assisted retry: re-try a photo left for review as “identify picture using location: …”',
+					value = bind 'locationAssistRetry',
+				},
+			},
+			f:static_text {
+				title = 'Photos are identified without location first; only those left for review are ' ..
+					'retried with it (your hint or the photo’s IPTC place) to disambiguate lookalikes.',
+				wrap = true, width = 540, height_in_lines = 2,
 			},
 			f:row {
 				f:static_text { title = 'Version: ' .. version },

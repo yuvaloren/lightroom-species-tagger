@@ -130,8 +130,6 @@ end
 
 -- lensSearchAdapter(opts) -> lensSearch( imageFile, lat, lng, place, query )
 --   opts.helperPath : absolute path to lens-search.js (bundled in the .lrplugin)
---   opts.nodePath   : optional absolute path to `node` (blank = auto-detect)
---   opts.debugDir   : when set, run a VISIBLE Chrome + keep artifacts here (Debug Lens)
 --   opts.interactive/interactiveState : escalate to a visible window on a challenge
 --   opts.keepOpen   : keep one window open across the batch (a new tab per photo)
 function M.lensSearchAdapter( opts )
@@ -150,17 +148,7 @@ function M.lensSearchAdapter( opts )
 			argv[ #argv + 1 ] = { value = place }
 		end
 
-		local env, errFile = {}, nil
-		if opts.debugDir and opts.debugDir ~= '' then
-			import( 'LrFileUtils' ).createAllDirectories( opts.debugDir )
-			-- headed + keep-open so a Chrome window stays open for inspection (the helper
-			-- launches it detached + exits, so this call still returns and nothing hangs).
-			env[ #env + 1 ] = { 'LENS_HEADED', '1' }
-			env[ #env + 1 ] = { 'LENS_DEBUG', '1' }
-			env[ #env + 1 ] = { 'LENS_KEEP_OPEN', '1' }
-			env[ #env + 1 ] = { 'LENS_DEBUG_DIR', opts.debugDir }
-			errFile = import( 'LrPathUtils' ).child( opts.debugDir, 'helper-stderr.log' )
-		end
+		local env = {}
 		if opts.interactive and ( not opts.interactiveState or opts.interactiveState.allow ) then
 			env[ #env + 1 ] = { 'LENS_INTERACTIVE', '1' }
 		end
@@ -172,7 +160,7 @@ function M.lensSearchAdapter( opts )
 		if photoPath and photoPath ~= '' then env[ #env + 1 ] = { 'LENS_PHOTO_PATH', photoPath } end
 		if photoName and photoName ~= '' then env[ #env + 1 ] = { 'LENS_PHOTO_NAME', photoName } end
 
-		local d, err = runHelper( node, helper, argv, env, errFile )
+		local d, err = runHelper( node, helper, argv, env )
 		if not d then return nil, err end
 		-- User cancelled the interactive challenge: a distinct sentinel (not an error)
 		-- so the caller can skip the photo and stop prompting for the rest of the run.
@@ -206,6 +194,27 @@ function M.lensReparseAdapter( opts )
 			return nil, 'Google Lens re-parse: ' .. ( d and tostring( d.error ) or 'no open window' )
 		end
 		return d.tabs or {}
+	end
+end
+
+-- lensRefineAdapter(opts) -> refine( photoPath, query ) : REUSE this photo's existing
+-- keep-open tab — add the location text to its search in place (no re-upload, no new
+-- tab) and re-scrape. Returns { overview=, strings= } | nil, err. See lens-search.js
+-- --refine. Only meaningful with "Keep the browser open" (the tab must still be open).
+function M.lensRefineAdapter( opts )
+	opts = opts or {}
+	local helper = opts.helperPath
+	local node = resolveNode( opts.nodePath, isWindows() )
+	return function( photoPath, query )
+		local env = {}
+		if query and query ~= '' then env[ #env + 1 ] = { 'LENS_QUERY', query } end
+		if photoPath and photoPath ~= '' then env[ #env + 1 ] = { 'LENS_PHOTO_PATH', photoPath } end
+		local d, err = runHelper( node, helper, { { value = '--refine', raw = true } }, env )
+		if not d then return nil, err end
+		if type( d ) ~= 'table' or not d.ok then
+			return nil, 'Google Lens refine: ' .. ( d and tostring( d.error ) or 'no open tab' )
+		end
+		return { overview = d.overview, strings = d.strings }
 	end
 end
 

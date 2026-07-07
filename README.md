@@ -169,7 +169,6 @@ for the dev toolchain — Windows *end users* just download the release):
 ./install.sh       # one-shot: toolchain + Lens helper deps + build + symlink into Lightroom
 ./dev-setup.sh     # just the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
 ./build.sh         # build dist/SpeciesTagger.lrplugin (+ zip + checksums)
-./debug-lens.sh    # troubleshoot a wrong ID in a visible Chrome with debug artifacts
 ```
 
 Or the finer-grained [`just`](https://github.com/casey/just) recipes:

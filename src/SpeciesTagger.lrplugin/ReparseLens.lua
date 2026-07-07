@@ -50,7 +50,6 @@ function M.run( _ )
 	local cfg = Config.load( LrPrefs.prefsForPlugin() )
 	local reparse = Http.lensReparseAdapter {
 		helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
-		nodePath = cfg.nodePath,
 	}
 
 	LrDialogs.showBezel( 'Re-parsing every open Lens tab…' )
@@ -95,13 +94,11 @@ function M.run( _ )
 		end
 	end
 
-	local summary = string.format( 'Re-parsed %d open Lens tab%s — tagged %d, review %d%s.\n\n%s',
+	-- Non-modal: the re-tagged keywords are visible in the Keyword List; a brief bezel
+	-- is enough (no annoying summary modal).
+	LrDialogs.showBezel( string.format( 'Re-parsed %d tab%s — tagged %d, review %d%s',
 		#tabs, #tabs == 1 and '' or 's', nApplied, nReview,
-		nUnmatched > 0 and ( ', unmatched ' .. nUnmatched ) or '',
-		table.concat( lines, '\n' ) )
-	summary = summary .. '\n\n(New keywords were added; remove any wrong earlier keyword from the Keyword List.)'
-	LrDialogs.message( 'Species Tagger — Re-parse', summary,
-		( nApplied == 0 and nUnmatched > 0 ) and 'warning' or 'info' )
+		nUnmatched > 0 and ( ', unmatched ' .. nUnmatched ) or '' ), 4 )
 end
 
 return M

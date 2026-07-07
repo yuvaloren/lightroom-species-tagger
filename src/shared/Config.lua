@@ -13,11 +13,6 @@ M.DEFAULTS = {
 	-- as a setting so another backend can be added without changing the pipeline.
 	backend = 'lens',
 
-	-- The Lens backend shells out to the bundled Node + Chrome helper. GUI apps get
-	-- a minimal PATH, so set this if `node` isn't auto-found (e.g.
-	-- /opt/homebrew/bin/node, or C:\Program Files\nodejs\node.exe). Blank = auto-detect.
-	nodePath = '',
-
 	-- Lens: keep the Chrome window open after each photo (a new tab per photo) so you
 	-- can refine the search and re-parse it (see TagSpecies "re-parse"), or ask
 	-- Google's AI more. Off = a popup window that closes after each photo.
@@ -27,15 +22,21 @@ M.DEFAULTS = {
 	-- been shown. Flipped to true the first time the action runs; see TagSpecies.
 	firstRunDone = false,
 
-	-- Ask for extra keywords to add to the Lens search at the start of each run
-	-- (issue: "prompt you for additional keywords"). lastExtraKeywords remembers the
-	-- previous entry to prefill the prompt.
-	promptExtraKeywords = true,
-	lastExtraKeywords = '',
+	-- Ask for two optional hints at the start of each run: a LOCATION (where the photo
+	-- was taken) and OTHER identifying keywords. last* remember the entries to prefill.
+	promptHints = true,
+	lastLocationHint = '',
+	lastOtherKeywords = '',
+
+	-- Location is decisive for visually ambiguous subjects (e.g. elephant seals) but
+	-- hurts easy, web-matchable photos, so it is NOT sent on the first pass. When a
+	-- photo comes back for review, retry ONCE with a location-assisted search
+	-- ("identify picture using location: <place>") using the location hint or the photo's IPTC
+	-- place. See docs/CORPUS.md and the LensQuery 'identify-location' strategy.
+	locationAssistRetry = true,
 
 	-- Keywording
 	keywordMode = 'flat', -- 'flat' | 'hierarchy' | 'both'  (flat = just the common + Latin name)
-	rootKeyword = '',     -- optional parent for the hierarchy (e.g. 'Wildlife')
 	flatRoot = '',        -- optional parent for the flat keywords
 	includeOnExport = true,
 	needsReviewKeyword = 'species: needs review',
@@ -55,6 +56,16 @@ function M.load( prefs )
 	for k, v in pairs( M.DEFAULTS ) do
 		local pv = prefs and prefs[ k ]
 		if pv == nil then cfg[ k ] = v else cfg[ k ] = pv end
+	end
+	-- Back-compat: carry the old single-field prefs onto the new two-field ones so an
+	-- existing install keeps its remembered entry + toggle after the split.
+	if prefs then
+		if prefs.promptHints == nil and prefs.promptExtraKeywords ~= nil then
+			cfg.promptHints = prefs.promptExtraKeywords
+		end
+		if ( not prefs.lastOtherKeywords or prefs.lastOtherKeywords == '' ) and prefs.lastExtraKeywords then
+			cfg.lastOtherKeywords = prefs.lastExtraKeywords
+		end
 	end
 	return cfg
 end
