@@ -33,6 +33,7 @@ local function clean( text )
 	s = trim( s )
 	s = s:gsub( '^[\'"]+', '' ):gsub( '[\'"]+$', '' )               -- surrounding ASCII quotes
 	s = s:gsub( '%s*%b()%s*$', '' )                                 -- a trailing "(...)"
+	s = s:gsub( '[\'"]+$', '' )                                     -- a closing quote the "(...)" had hidden
 	return trim( s )
 end
 M._clean = clean

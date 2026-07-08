@@ -32,5 +32,15 @@
       <li><a href="#">Frogfish aquarium care</a></li>
     </ul>
   </section>
+
+  <!-- Off-page targets the integration test selects by id via Range.selectNodeContents.
+       Each is on its own line with no inner indentation so the selection is the exact
+       string. Kept in the render tree (off to the left) so getSelection() works —
+       display:none would make the selection empty. Not part of a real Lens page. -->
+  <section id="__test_targets" style="position:absolute;left:-9999px;top:0">
+    <div id="__t_common">Giant frogfish</div>
+    <div id="__t_combined">Giant frogfish (Antennarius commerson)</div>
+    <div id="__t_curly">“Randall’s frogfish”</div>
+  </section>
 </body>
 </html>
