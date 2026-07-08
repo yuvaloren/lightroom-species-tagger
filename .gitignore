@@ -23,6 +23,9 @@
 luacov.stats.out
 luacov.report.out
 
+# Transient rename target used by `just clean` (removed at the end of the recipe).
+/.output-trash-*
+
 # ─────────────────────────────────────────────────────────────────────────────
 # Never-commit user data (real photos / captures can carry personal EXIF or tokens).
 # ─────────────────────────────────────────────────────────────────────────────

@@ -68,10 +68,13 @@ changelog:
 # full local gate before pushing: lint + test + build
 check: lint test build
 
-# remove EVERYTHING generated — the whole output/ tree (bundle + pulled deps) +
-# coverage artifacts. The next `just build`/`just test` regenerates what it needs.
+# Race-free delete: `mv` atomically renames output/ out of existence in ONE syscall — we
+# never rmdir a live directory (which can fail "Directory not empty" if a watcher, e.g.
+# Finder recreating .DS_Store, an IDE, or a sync daemon, adds a file between emptying and
+# removing it). Then rm the uniquely-named copy, which nothing is watching.
+# Remove EVERYTHING generated — the output/ tree (bundle + pulled deps) + coverage artifacts.
 clean:
-    rm -rf output
+    if [ -e output ]; then mv output ".output-trash-$$" && rm -rf ".output-trash-$$"; fi
     rm -f luacov.stats.out luacov.report.out
 
 # a full reset: also drop the pinned Lua toolchain + the Lens helper's node_modules
