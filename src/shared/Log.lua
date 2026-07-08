@@ -1,8 +1,8 @@
 --[[----------------------------------------------------------------------------
 Log.lua
-A thin logging shim. Inside Lightroom it wraps LrLogger; headless (tests, the
-offline accuracy script) it degrades to a no-op so the same modules load
-unchanged. Also exposes redact() for keeping API keys/tokens out of logs.
+A thin logging shim. Inside Lightroom it wraps LrLogger; headless (tests) it
+degrades to a no-op so the same modules load unchanged. Also exposes redact()
+for keeping API keys/tokens out of logs.
 ------------------------------------------------------------------------------]]
 
 local M = {}

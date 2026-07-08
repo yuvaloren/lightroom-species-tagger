@@ -27,18 +27,14 @@ luacov.report.out
 /.output-trash-*
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Never-commit user data (real photos / captures can carry personal EXIF or tokens).
+# Never-commit user data. The automated suite uses NO real photos: unit tests replay
+# the committed GBIF JSON in spec/fixtures/gbif/, and the Lens-helper integration test
+# generates a throwaway JPEG at run time. So no image belongs in the tree — this guard
+# keeps a stray photo (personal EXIF / GPS) from being committed by accident.
 # ─────────────────────────────────────────────────────────────────────────────
-
-# Test images are your own photos — never committed (they can carry personal EXIF).
-/spec/fixtures/images/*
-!/spec/fixtures/images/.gitkeep
-!/spec/fixtures/images/README.md
-
-# Local-only leftovers from earlier tooling — NEVER commit: raw Google HTML can carry
-# session tokens, and cached captures include your own photos. (Regenerable local cache.)
-/spec/fixtures/lens/
-/spec/fixtures/live/
+spec/**/*.jpg
+spec/**/*.jpeg
+spec/**/*.png
 
 # macOS
 .DS_Store

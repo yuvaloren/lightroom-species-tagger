@@ -142,6 +142,8 @@ the zip to a GitHub Release. Distribution options are in
 
 ## Privacy & scope for test data
 
-Never commit real photos (they can carry personal EXIF) — the `.gitignore` blocks
-`spec/fixtures/images/`. The committed GBIF fixtures under `spec/fixtures/gbif/` are
-impersonal API responses. Keep any added test data open-licensed or synthetic.
+The automated suite uses **no real photos**. Unit tests replay the committed,
+impersonal GBIF JSON in `spec/fixtures/gbif/`; the Lens-helper integration test
+generates a throwaway JPEG at run time. Don't add images to the tree —
+`.gitignore` guards against it (`spec/**/*.jpg` etc.). Keep any new test data
+small, open-licensed or synthetic, and free of personal EXIF, accounts, or tokens.
