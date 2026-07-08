@@ -26,6 +26,7 @@ local LrFileUtils = import 'LrFileUtils'
 
 local Config = require 'Config'
 local SelectedName = require 'SelectedName'
+local KeywordApply = require 'KeywordApply'
 local Http = require 'Http'
 local Log = require 'Log'
 
@@ -71,26 +72,6 @@ local function writeTempJpeg( bytes )
 	fh:write( bytes )
 	fh:close()
 	return path
-end
-
--- Ensure a keyword path exists (creating ancestors as needed) and return the leaf.
--- Must be called inside catalog:withWriteAccessDo.
-local function ensureLeaf( catalog, path, synonyms, includeOnExport )
-	local parent, leaf
-	for idx, name in ipairs( path ) do
-		local isLeaf = ( idx == #path )
-		leaf = catalog:createKeyword( name, isLeaf and ( synonyms or {} ) or {},
-			includeOnExport, parent, true ) -- returnExisting = true
-		parent = leaf
-	end
-	return leaf
-end
-
-local function applyPlan( catalog, photo, plan, cfg )
-	for _, node in ipairs( plan.nodes ) do
-		local leaf = ensureLeaf( catalog, node.path, node.synonyms, cfg.includeOnExport )
-		if node.attach and leaf then photo:addKeyword( leaf ) end
-	end
 end
 
 --------------------------------------------------------------------------------
@@ -183,7 +164,7 @@ function M.run( _ )
 					local res = SelectedName.resolve( name, resolveDeps, keyCfg )
 					if res.ok then
 						catalog:withWriteAccessDo( 'Tag species', function()
-							applyPlan( catalog, photo, res.plan, cfg )
+							KeywordApply.apply( catalog, photo, res.plan, cfg )
 						end, { timeout = 30 } )
 						nApplied = nApplied + 1
 						lines[ #lines + 1 ] = string.format( '✓ %s — %s (%s)', fileName( photo ),

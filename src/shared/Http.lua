@@ -49,7 +49,8 @@ end
 -- Google Lens has no anonymous API and its results are rendered by JavaScript,
 -- which LrHttp can't execute. So the Lens backend shells out (via LrTasks.execute)
 -- to the bundled Node helper (scripts/lens/lens-search.js), which drives the user's
--- installed Chrome to render the results and prints JSON { ok, overview, strings }.
+-- installed Chrome to render the results and prints one JSON line { ok, name }
+-- (or { ok = false, cancelled|error }).
 -- Everything below is cross-platform: the command is built for the POSIX shell on
 -- macOS/Linux and for cmd.exe on Windows (WIN_ENV). Needs Node + Google Chrome.
 
@@ -141,6 +142,21 @@ local function runHelper( node, helper, argv, env, errFile )
 	return decoded
 end
 
+-- Interpret the helper's decoded stdout (`d`) — or a runHelper error (`err`) — into the
+-- tag() contract (name | nil,errString). Pure: no I/O, so it's unit-testable via _test.
+--   * runHelper failed          -> (nil, err)
+--   * { cancelled = true }       -> (nil, LENS_CANCELLED)  [user pressed Skip; not an error]
+--   * { ok = true, name = 's' }  -> (s)
+--   * anything else              -> (nil, 'Google Lens assist: <error|nothing was tagged>')
+local function interpretTagResult( d, err )
+	if not d then return nil, err end
+	if type( d ) == 'table' and d.cancelled then return nil, M.LENS_CANCELLED end
+	if type( d ) ~= 'table' or not d.ok or type( d.name ) ~= 'string' or d.name == '' then
+		return nil, 'Google Lens assist: ' .. ( d and tostring( d.error ) or 'nothing was tagged' )
+	end
+	return d.name
+end
+
 -- lensAssistAdapter(opts) -> { tag(imageFile, pos) -> name|nil,err ; close() }
 -- Assistive mode. tag() opens Google Lens in a VISIBLE window (reusing one window across
 -- photos, a fresh tab each), shows an "m of n" counter (pos), and blocks until the user
@@ -159,12 +175,7 @@ function M.lensAssistAdapter( opts )
 			if pos and pos ~= '' then env[ #env + 1 ] = { 'LENS_ASSIST_POS', pos } end
 			if port then env[ #env + 1 ] = { 'LENS_TABS_PORT', port } end
 			local d, err = runHelper( node, helper, { { value = imageFile } }, env )
-			if not d then return nil, err end
-			if type( d ) == 'table' and d.cancelled then return nil, M.LENS_CANCELLED end
-			if type( d ) ~= 'table' or not d.ok or type( d.name ) ~= 'string' or d.name == '' then
-				return nil, 'Google Lens assist: ' .. ( d and tostring( d.error ) or 'nothing was tagged' )
-			end
-			return d.name
+			return interpretTagResult( d, err )
 		end,
 		-- Best-effort clean shutdown of the reused window; ignores errors (nothing to close).
 		close = function()
@@ -175,5 +186,12 @@ function M.lensAssistAdapter( opts )
 	}
 end
 
+-- Pure helpers exposed for white-box tests (no LrHttp/LrTasks needed to reach them).
+M._test = {
+	toLrHeaders = toLrHeaders,
+	shQuote = shQuote,
+	resolveNode = resolveNode,
+	interpretTagResult = interpretTagResult,
+}
 
 return M
