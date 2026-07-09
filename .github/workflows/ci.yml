@@ -17,15 +17,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
 
-      - uses: leafo/gh-actions-lua@v10
+      - uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: "5.1.5"
 
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-luarocks@v6
 
       - name: Install Lua tooling
         # luacheck is pinned because the gate is "0 warnings" — a new luacheck
@@ -51,7 +51,7 @@ jobs:
 
       # Node deps for the Lens helper, so the built bundle is self-contained
       # (end users unzip and run — no npm needed). puppeteer-core is pure JS.
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -94,7 +94,7 @@ jobs:
           for z in output/dist/*.zip; do unzip -t "$z" >/dev/null && echo "ok: $z"; done
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lrplugin
           path: |
@@ -105,13 +105,13 @@ jobs:
   lens-helper:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v4
-      - uses: actions/setup-node@v4
+      - uses: actions/checkout@v7
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
           cache-dependency-path: scripts/lens/package-lock.json
-      - uses: browser-actions/setup-chrome@c785b87e244131f27c9f19c1a33e2ead956ab7ce # v1
+      - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         id: setup-chrome
       - name: Install the Lens helper deps
         run: cd scripts/lens && npm ci
@@ -132,18 +132,18 @@ jobs:
     needs: [build, lens-helper]
     runs-on: macos-14
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0
 
-      - uses: leafo/gh-actions-lua@v10
+      - uses: leafo/gh-actions-lua@v13
         with:
           luaVersion: "5.1.5"
-      - uses: leafo/gh-actions-luarocks@v4
+      - uses: leafo/gh-actions-luarocks@v6
       - name: Install the Lua build dependency
         run: luarocks install luafilesystem
 
-      - uses: actions/setup-node@v4
+      - uses: actions/setup-node@v6
         with:
           node-version: "20"
           cache: npm
@@ -170,7 +170,7 @@ jobs:
           NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
 
       - name: Upload the signed bundle
-        uses: actions/upload-artifact@v4
+        uses: actions/upload-artifact@v7
         with:
           name: lrplugin-signed
           path: |
@@ -187,12 +187,12 @@ jobs:
     permissions:
       contents: write # create the GitHub Release and upload assets
     steps:
-      - uses: actions/checkout@v4
+      - uses: actions/checkout@v7
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
 
       - name: Download the signed bundle
-        uses: actions/download-artifact@v4
+        uses: actions/download-artifact@v8
         with:
           name: lrplugin-signed
           path: output/dist
@@ -206,7 +206,7 @@ jobs:
           args: --latest --strip all
 
       - name: Release
-        uses: softprops/action-gh-release@3bb12739c298aeb8a4eeaf626c5b8d85266b0e65 # v2.6.2
+        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
         with:
           body: ${{ steps.cliff.outputs.content }}
           generate_release_notes: true
