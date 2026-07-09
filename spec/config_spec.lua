@@ -10,9 +10,9 @@ describe( 'Config.load', function()
 		assert.equal( 1024, c.maxEdge )
 	end )
 	it( 'overlays stored prefs on the defaults', function()
-		local c = Config.load { keywordMode = 'both', flatRoot = 'Wildlife' }
+		local c = Config.load { keywordMode = 'both', maxEdge = 2048 }
 		assert.equal( 'both', c.keywordMode )
-		assert.equal( 'Wildlife', c.flatRoot )
+		assert.equal( 2048, c.maxEdge )
 		assert.is_true( c.includeOnExport ) -- untouched default
 	end )
 	it( 'preserves a stored false (does not snap back to the true default)', function()

@@ -20,7 +20,7 @@ accepted Latin name, preferred common name, and classification. Run it from a no
 tag is simply left untouched.
 
 ### Does it run on Windows?
-Yes — **macOS, Linux, and Windows** are all supported. The Lens helper locates Chrome and
+Yes — **macOS and Windows** are both supported. The Lens helper locates Chrome and
 Node on each automatically.
 
 ### Can I add keywords to the search?

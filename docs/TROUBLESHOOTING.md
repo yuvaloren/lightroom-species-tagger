@@ -11,7 +11,7 @@ The Lens step opens your installed Chrome via a helper that runs on the plugin's
 bundled Node runtime. Check:
 - **Google Chrome installed.** Node ships inside the plugin (per-OS binary) and the helper's
   deps are bundled too, so there's no Node to install and nothing to `npm install`. The
-  helper finds your Chrome automatically on macOS / Windows / Linux (override with
+  helper finds your Chrome automatically on macOS / Windows (override with
   `LENS_CHROME`).
 - Run from a normal home (residential) connection — Google challenges datacenter/VPN/shared
   IPs. If an "are you human" check appears, solve it yourself in the window, then highlight

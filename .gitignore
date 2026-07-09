@@ -38,7 +38,3 @@ spec/**/*.png
 
 # macOS
 .DS_Store
-
-# The maintainer's private working scratchpad — kept locally, never shipped in the
-# public repo. Outward-facing plans live in ROADMAP.md; bugs/ideas go to GitHub issues.
-/Issues.txt

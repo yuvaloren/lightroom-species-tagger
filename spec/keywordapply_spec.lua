@@ -68,18 +68,13 @@ describe( 'KeywordApply.apply', function()
 		assert.same( { 'Day octopus' }, created[ #created ].synonyms ) -- leaf: common as synonym
 	end )
 
-	it( 'creates a shared ancestor with returnExisting so the catalog can de-dupe it', function()
+	it( 'creates every keyword with returnExisting so the catalog can de-dupe repeats', function()
 		local catalog, created = newCatalogMock()
-		local photo, attached = newPhotoMock()
-		KeywordApply.apply( catalog, photo,
-			Keywords.plan( OCTOPUS, { mode = 'flat', flatRoot = 'Wildlife' } ),
+		local photo = newPhotoMock()
+		KeywordApply.apply( catalog, photo, Keywords.plan( OCTOPUS, { mode = 'hierarchy' } ),
 			{ includeOnExport = true } )
-		local wildlife = 0
-		for _, c in ipairs( created ) do
-			if c.name == 'Wildlife' then wildlife = wildlife + 1; assert.is_true( c.returnExisting ) end
-		end
-		assert.equal( 2, wildlife ) -- one per flat keyword, both under the same reused root
-		assert.same( { 'Day octopus', 'Octopus cyanea' }, attached )
+		assert.is_true( #created > 0 )
+		for _, c in ipairs( created ) do assert.is_true( c.returnExisting ) end
 	end )
 
 	it( 'attaches nothing for an empty plan', function()

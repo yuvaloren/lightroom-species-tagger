@@ -58,11 +58,6 @@ function M.sectionsForTopOfDialog( f, _ )
 				},
 			},
 			f:row {
-				f:static_text { title = 'Keyword root:', width = labelW, alignment = 'right' },
-				f:edit_field { value = bind 'flatRoot', width_in_chars = 20 },
-				f:static_text { title = 'optional parent keyword, e.g. Wildlife' },
-			},
-			f:row {
 				f:checkbox { title = 'Include applied keywords on export', value = bind 'includeOnExport' },
 			},
 			f:row {

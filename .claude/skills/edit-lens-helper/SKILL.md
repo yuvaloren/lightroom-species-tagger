@@ -27,7 +27,7 @@ These invariants are load-bearing — preserve every one.
   `navigator.webdriver` spoof. The UA/Client-Hints match is only so Google renders the
   normal page; the window is visible.
 - **Cross-platform.** Chrome discovery (`findChrome`) and the shell-free `curl`/`spawn`
-  calls must keep working on macOS / Windows / Linux.
+  calls must keep working on macOS / Windows.
 - **Output contract.** Exactly one line of JSON on stdout: `{ ok:true, name }` |
   `{ ok:false, cancelled }` (Skip) | `{ ok:false, error }` (timeout/error) |
   `{ ok:true, closed:true }` (the close command). Debug goes to stderr.

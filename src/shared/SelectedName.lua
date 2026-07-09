@@ -50,7 +50,7 @@ M._looksBinomial = looksBinomial
 
 -- resolve( text, deps [, cfg] ) -> result
 --   deps : { http = <adapter>, cache = <table?> }  (same shape Taxonomy.resolve takes)
---   cfg  : { keywordMode=, flatRoot=, rootKeyword=, commonAsSynonym= }
+--   cfg  : { keywordMode=, commonAsSynonym= }
 -- result: { ok=true,  taxon=, plan=, kind=, name= }   (kind = how GBIF resolved it)
 --       | { ok=false, reason=, name= }
 function M.resolve( text, deps, cfg )
@@ -73,8 +73,6 @@ function M.resolve( text, deps, cfg )
 
 	local plan = Keywords.plan( taxon, {
 		mode = cfg.keywordMode,
-		flatRoot = cfg.flatRoot,
-		rootKeyword = cfg.rootKeyword,
 		commonAsSynonym = cfg.commonAsSynonym,
 	} )
 	return { ok = true, taxon = taxon, plan = plan, kind = usedKind, name = cleaned }

@@ -24,7 +24,7 @@ If it isn't green, that's the first ask. No `just`?
 - **Logic belongs in the pure core.** New decision logic should live in `src/shared/` with
   I/O injected via `deps`, **not** in the Lightroom glue (`src/*.lrplugin/`). A glue-side
   algorithm is a red flag — ask for it to move behind the seam with a spec. See
-  [ARCHITECTURE.md](../../../ARCHITECTURE.md).
+  [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md).
 - **New/changed logic has a spec.** Pure functions get white-box tests via the module's
   `_test` table. No spec ⇒ ask for one.
 - **The plugin must never scrape Google.** Any change to the Lens helper must read only the

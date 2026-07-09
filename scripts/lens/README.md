@@ -28,7 +28,7 @@ npm i              # installs puppeteer-core (uses your installed Chrome; no dow
 ```
 
 Requirements: **Node.js**, **Google Chrome** installed, and `curl`. Chrome and Node are
-found automatically on macOS / Windows / Linux; override Chrome with
+found automatically on macOS / Windows; override Chrome with
 `LENS_CHROME=/path/to/chrome`.
 
 ## Use

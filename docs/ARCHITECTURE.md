@@ -1,8 +1,8 @@
 # Architecture
 
 A map of how this plugin is put together and *why* — read this before your first
-change. For the how-to of running the gate and sending a PR, see
-[CONTRIBUTING.md](CONTRIBUTING.md).
+change. For the how-to of running the gate and building, see the
+[*Building from source*](../README.md#building-from-source) section of the README.
 
 ## The one idea that explains everything
 
@@ -101,4 +101,4 @@ This is the entire seam between the pure core and the browser.
 `output/dist/SpeciesTagger.lrplugin`, stamps the version, and zips it with checksums. CI
 runs the same `luacheck` + `busted` + build on every push; a `v*` tag additionally
 publishes a GitHub Release. `just check` is the whole gate. Details in
-[CONTRIBUTING.md](CONTRIBUTING.md) and [docs/DISTRIBUTION.md](docs/DISTRIBUTION.md).
+[DISTRIBUTION.md](DISTRIBUTION.md).

@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# dev-setup.sh — one-shot developer bootstrap (macOS / Linux).
+# dev-setup.sh — one-shot developer bootstrap (macOS).
 #
 # Builds an isolated, pinned Lua 5.1.5 + LuaRocks toolchain in .lua-env/ (matching
 # CI and the Lightroom runtime), then installs the dev rocks and pulls the pinned

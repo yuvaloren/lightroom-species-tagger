@@ -1,7 +1,6 @@
 <!--
 Thanks for contributing! Keep PRs small and focused — one change per PR is easiest
-to review and revert. Everything below maps to CONTRIBUTING.md; if a box doesn't
-apply, say so rather than deleting it.
+to review and revert. If a box doesn't apply, say so rather than deleting it.
 -->
 
 ## What & why
@@ -23,7 +22,7 @@ Run the same gate CI runs — paste the result or tick the box:
 ## If you touched the Lens helper or added test fixtures
 
 - [ ] Node helper changes are covered by `scripts/lens/test/integration.test.js` (the real helper vs a local fake Google, headless, no network) — run `just lens-test`.
-- [ ] The suite uses **no real photos**; any new fixture is small, impersonal, and open-licensed/synthetic — **no personal photos, EXIF, accounts, or tokens** (see CONTRIBUTING.md → *Privacy & scope for test data*).
+- [ ] The suite uses **no real photos**; any new fixture is small, impersonal, and open-licensed/synthetic — **no personal photos, EXIF, accounts, or tokens**.
 
 ## Housekeeping
 

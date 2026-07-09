@@ -91,8 +91,8 @@ local function firstRunWelcome()
 		'You stay in control — the plugin uses only the name you highlight; it does not read ' ..
 			'Google’s results for you.',
 		'',
-		'Settings live in  File ▸ Plug-in Manager ▸ Species Tagger  (keyword style, keyword ' ..
-			'root, export). Recognition needs only Google Chrome installed.',
+		'Settings live in  File ▸ Plug-in Manager ▸ Species Tagger  (keyword style, export). ' ..
+			'Recognition needs only Google Chrome installed.',
 		'',
 		'Run it from  Library ▸ Plug-in Extras ▸ Identify and Tag Species.',
 	}, '\n' ), 'info' )
@@ -123,7 +123,7 @@ function M.run( _ )
 		tabsPort = ASSIST_PORT,
 	}
 	local resolveDeps = { http = Http.lrAdapter(), cache = {} } -- shared GBIF cache for the run
-	local keyCfg = { keywordMode = cfg.keywordMode, flatRoot = cfg.flatRoot }
+	local keyCfg = { keywordMode = cfg.keywordMode }
 
 	LrDialogs.showBezel( 'A Chrome window opens showing Google’s results — highlight the species and press Tag.' )
 

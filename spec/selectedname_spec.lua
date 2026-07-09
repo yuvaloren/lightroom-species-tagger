@@ -76,17 +76,10 @@ describe( 'SelectedName.resolve (offline, fixture-backed)', function()
 		assert.equal( 'common', r.kind )
 	end )
 
-	it( 'passes cfg (mode, rootKeyword, flatRoot) through into the keyword plan', function()
-		local r = SelectedName.resolve( 'Octopus cyanea', deps,
-			{ keywordMode = 'both', rootKeyword = 'Life', flatRoot = 'Wildlife' } )
+	it( 'passes the keyword mode through into the keyword plan', function()
+		local r = SelectedName.resolve( 'Octopus cyanea', deps, { keywordMode = 'both' } )
 		assert.is_true( r.ok )
 		assert.equal( 'both', r.plan.mode )
-		assert.equal( 'Life', r.plan.nodes[ 1 ].path[ 1 ] ) -- hierarchy nested under rootKeyword
-		local sawFlatRoot = false
-		for _, n in ipairs( r.plan.nodes ) do
-			if n.path[ 1 ] == 'Wildlife' then sawFlatRoot = true end -- flat keywords under flatRoot
-		end
-		assert.is_true( sawFlatRoot )
 	end )
 
 	it( 'reports not-found when GBIF does not recognise the selection', function()

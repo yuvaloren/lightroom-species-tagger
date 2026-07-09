@@ -40,7 +40,7 @@ keywords too.
   the results before you pick (see [Using it](#using-it)).
 - **One window, m-of-n.** Multi-photo runs reuse a single Chrome window with a "Photo 2
   of 5" counter; **Skip** leaves a photo untouched.
-- **Cross-platform:** macOS, Linux, and Windows.
+- **Cross-platform:** macOS and Windows.
 
 ## Install (from a release)
 
@@ -89,7 +89,6 @@ Open **Plug-in Manager ▸ Species Tagger**.
 | Setting | What it does |
 |---|---|
 | Keywords | `flat` (common + Latin), `hierarchy` (Kingdom→Species), or `both` |
-| Keyword root | Optional parent keyword to nest the keywords under (e.g. `Wildlife`) |
 | Include applied keywords on export | Whether the keywords travel with exported files |
 
 ## How it works
@@ -118,11 +117,11 @@ Open **Plug-in Manager ▸ Species Tagger**.
 
 The whole resolve → keyword pipeline is pure and unit-tested, independent of the browser
 helper that feeds it. The full mental model — the layers, the data flow, and a "where do
-I change X?" table — is in [ARCHITECTURE.md](ARCHITECTURE.md).
+I change X?" table — is in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## Building from source
 
-Everything is driven by scripts at the repo root (macOS / Linux; on Windows use WSL
+Everything is driven by scripts at the repo root (macOS; on Windows use WSL
 for the dev toolchain — Windows *end users* just download the release):
 
 ```
@@ -220,10 +219,10 @@ third-party services.
 
 ## Contributing
 
-See [CONTRIBUTING.md](CONTRIBUTING.md) — how to set up in one command, the test/lint
-gate, and the layout. [ARCHITECTURE.md](ARCHITECTURE.md) is the mental model;
-[ROADMAP.md](ROADMAP.md) is where things are headed. Issues and PRs welcome — this
-project follows a [Code of Conduct](CODE_OF_CONDUCT.md).
+Issues and PRs welcome. [Building from source](#building-from-source) above is the whole
+setup — `just check` (lint + tests + build) is the entire gate. For the mental model —
+the layers, the data flow, and a "where do I change X?" table — see
+[ARCHITECTURE.md](docs/ARCHITECTURE.md).
 
 ## License
 

@@ -18,7 +18,7 @@ the relevant one before the matching task and follow it by hand.
 | [edit-lens-helper](edit-lens-helper/SKILL.md) | Touching the Node/Puppeteer Google Lens helper (`scripts/lens`). |
 | [update-lightroom-glue](update-lightroom-glue/SKILL.md) | Changing the Lightroom plugin glue (menus, settings, catalog writes). |
 
-They complement — never replace — [CONTRIBUTING.md](../../CONTRIBUTING.md) and
-[ARCHITECTURE.md](../../ARCHITECTURE.md): those explain the project; these are the
+They complement — never replace — the [README](../../README.md) and
+[ARCHITECTURE.md](../../docs/ARCHITECTURE.md): those explain the project; these are the
 step-by-step for specific recurring tasks. When a procedure changes, update the skill in
 the same PR.

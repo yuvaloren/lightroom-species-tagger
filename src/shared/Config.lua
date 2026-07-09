@@ -14,7 +14,6 @@ M.DEFAULTS = {
 
 	-- Keywording.
 	keywordMode = 'flat', -- 'flat' (common + Latin) | 'hierarchy' (Kingdom→Species) | 'both'
-	flatRoot = '',        -- optional parent keyword to nest the keywords under (e.g. 'Wildlife')
 	includeOnExport = true,
 
 	-- Longest edge (px) of the downsized JPEG uploaded to Lens (also strips original EXIF/GPS).

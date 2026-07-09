@@ -10,7 +10,7 @@ Everything interesting lives in the pure `src/shared/` core; the glue only rende
 gathers input, and writes the catalog. If you're new to Lua or the LrC SDK, this is the
 guardrail so a change here doesn't wedge Lightroom or duplicate keywords.
 
-Full mental model: [ARCHITECTURE.md](../../../ARCHITECTURE.md). SDK reference:
+Full mental model: [ARCHITECTURE.md](../../../docs/ARCHITECTURE.md). SDK reference:
 <https://developer.adobe.com/lightroom-classic/>.
 
 ## The mental model

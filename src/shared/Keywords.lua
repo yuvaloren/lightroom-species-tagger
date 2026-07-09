@@ -46,8 +46,6 @@ end
 
 -- plan( taxon, opts ) -> { nodes = {...}, attachNames = {...}, mode = <string> }
 --   opts.mode          : 'flat' | 'hierarchy' | 'both'   (default 'flat')
---   opts.rootKeyword   : optional parent to nest the hierarchy under (e.g. 'Wildlife')
---   opts.flatRoot      : optional parent for the flat keywords (default top-level)
 --   opts.commonAsSynonym : attach the common name as a synonym of the Latin leaf (default true)
 function M.plan( taxon, opts )
 	opts = opts or {}
@@ -65,22 +63,17 @@ function M.plan( taxon, opts )
 
 	if ( mode == 'hierarchy' or mode == 'both' ) and sci then
 		local path = {}
-		if opts.rootKeyword and opts.rootKeyword ~= '' then path[ #path + 1 ] = opts.rootKeyword end
 		for _, lvl in ipairs( M.hierarchyLevels( taxon ) ) do path[ #path + 1 ] = lvl end
 		local leafSyn = ( commonAsSynonym and common ) and { common } or {}
 		addNode( path, leafSyn, true )
 	end
 
 	if mode == 'flat' or mode == 'both' then
-		local function flatPath( name )
-			if opts.flatRoot and opts.flatRoot ~= '' then return { opts.flatRoot, name } end
-			return { name }
-		end
 		if common then
-			addNode( flatPath( common ), ( sci and { sci } ) or {}, true )
+			addNode( { common }, ( sci and { sci } ) or {}, true )
 		end
 		if sci then
-			addNode( flatPath( sci ), ( common and { common } ) or {}, true )
+			addNode( { sci }, ( common and { common } ) or {}, true )
 		end
 	end
 
