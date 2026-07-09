@@ -14,7 +14,7 @@ and steps to reproduce. You can expect an acknowledgement within a few days.
 This is a small, single-maintainer project, so please allow reasonable time for
 a fix before any public disclosure.
 
-[advisory]: https://github.com/yoren/lightroom-species-tagger/security/advisories/new
+[advisory]: https://github.com/yuvaloren/lightroom-species-tagger/security/advisories/new
 
 ## Supported versions
 

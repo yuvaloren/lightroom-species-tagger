@@ -1,6 +1,6 @@
 # Lightroom Species Tagger
 
-[![CI](https://github.com/yoren/lightroom-species-tagger/actions/workflows/ci.yml/badge.svg)](https://github.com/yoren/lightroom-species-tagger/actions/workflows/ci.yml)
+[![CI](https://github.com/yuvaloren/lightroom-species-tagger/actions/workflows/ci.yml/badge.svg)](https://github.com/yuvaloren/lightroom-species-tagger/actions/workflows/ci.yml)
 
 Tag the **plants and animals** in your photos with both the **common name** and the
 **Latin (scientific) name** — straight from the Library module in **Adobe Lightroom
@@ -48,7 +48,7 @@ You only need **Google Chrome** installed (that's what shows the Lens results yo
 tag from). Then:
 
 1. Download the latest `SpeciesTagger.lrplugin-*.zip` from
-   [Releases](https://github.com/yoren/lightroom-species-tagger/releases) and unzip.
+   [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases) and unzip.
    The bundle is **self-contained** — it ships its own Node runtime *and* the Lens
    helper's dependencies, so there's no Node to install and nothing to `npm install`.
 2. Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select the

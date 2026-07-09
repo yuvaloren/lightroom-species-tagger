@@ -50,7 +50,7 @@ The install story is the universal one every Lightroom Classic user already
 knows, and it matches the [README](../README.md):
 
 - [ ] Download the latest `SpeciesTagger.lrplugin-*.zip` from
-      [Releases](https://github.com/yoren/lightroom-species-tagger/releases) and
+      [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases) and
       unzip it.
 - [ ] Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select the
       unzipped `SpeciesTagger.lrplugin` folder.
