@@ -32,13 +32,13 @@ Env:
   Test/debug: LENS_TEST_URL (skip upload, point at a local fake server),
   LENS_TEST_HEADLESS=1 (headless — the ONLY headless path; local test only), LENS_DEBUG=1.
 ----------------------------------------------------------------------------*/
-const { execFileSync, spawn } = require('child_process');
+const { spawn } = require('child_process');
 const fs = require('fs');
 const path = require('path');
 const os = require('os');
 const puppeteer = require('puppeteer-core');
 const { assistOverlayInjector } = require('./overlay-inject');
-const { findChrome } = require('./find-chrome');
+const { findChrome, chromeVersion } = require('./find-chrome');
 
 const IS_WIN = process.platform === 'win32';
 
@@ -48,16 +48,9 @@ const CHROME = findChrome();
 // Match the UA + Client Hints to the REAL installed Chrome so Google serves the normal
 // results page (a HeadlessChrome UA, or a UA whose major disagrees with the Client Hints,
 // gets a degraded/blocked variant). About rendering the real page correctly, not disguise —
-// the window is visible the whole time.
-function chromeVersion() {
-  try {
-    const v = execFileSync(CHROME, ['--version'], { timeout: 10000 }).toString();
-    const m = v.match(/(\d+)\.\d+\.\d+\.\d+/);
-    if (m) return { full: m[0], major: m[1] };
-  } catch (_) {}
-  return { full: '149.0.0.0', major: '149' };
-}
-const CHROME_VER = chromeVersion();
+// the window is visible the whole time. chromeVersion() never launches Chrome on Windows
+// (reading `chrome --version` there pops a phantom window) — see find-chrome.js.
+const CHROME_VER = chromeVersion(CHROME);
 const PLATFORM = IS_WIN ? { ua: 'Windows NT 10.0; Win64; x64', ch: 'Windows', chVer: '10.0.0' }
   : process.platform === 'darwin' ? { ua: 'Macintosh; Intel Mac OS X 10_15_7', ch: 'macOS', chVer: '15.0.0' }
   : { ua: 'X11; Linux x86_64', ch: 'Linux', chVer: '' };
