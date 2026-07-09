@@ -46,6 +46,13 @@ function assistOverlayInjector(pos) {
     tagBtn.id = '__lens_tag';
     tagBtn.textContent = '🏷️ Tag';
     tagBtn.style.cssText = 'background:#e6a23c;color:#1d1405;border:0;border-radius:999px;padding:8px 18px;font-weight:700;cursor:pointer;font:inherit;transition:background .12s,color .12s';
+    // A real mouse press on a <button> takes focus and COLLAPSES the page's text
+    // selection before the click handler runs — so window.getSelection() would already
+    // be empty by the time Tag reads it, and the user's highlight would be lost. Stop the
+    // mousedown default so the button never steals focus (the standard toolbar-button
+    // technique), preserving the selection for onclick. A programmatic .click() (the test
+    // harness) skips mousedown, which is why this gap only shows up under a real click.
+    tagBtn.onmousedown = function ( e ) { e.preventDefault(); };
     tagBtn.onclick = function () {
       if (tagBtn.disabled) return;
       var sel = (window.getSelection ? String(window.getSelection()) : '').replace(/^\s+|\s+$/g, '');

@@ -18,8 +18,10 @@ exposeFunction, so it keeps working across those reconnects.
 
 Output (stdout): a single JSON line — { ok:true, name } | { ok:false, cancelled|error }.
 
-Requires: curl, Google Chrome installed, and `npm i` here (puppeteer-core). Override Chrome
-with LENS_CHROME=/path/to/chrome. Run from a residential network.
+Requires: Google Chrome installed, and `npm i` here (puppeteer-core). Override Chrome
+with LENS_CHROME=/path/to/chrome. Run from a residential network. The image is uploaded
+IN this Chrome (same session that views the results) — no separate curl session, and no
+fabricated consent cookie; any consent screen is handled by the user in the visible window.
 
 Env:
   LENS_ASSIST_POS      text shown in the bar, e.g. "Photo 2 of 5"
@@ -36,34 +38,11 @@ const path = require('path');
 const os = require('os');
 const puppeteer = require('puppeteer-core');
 const { assistOverlayInjector } = require('./overlay-inject');
+const { findChrome } = require('./find-chrome');
 
 const IS_WIN = process.platform === 'win32';
-const NULL_DEVICE = IS_WIN ? 'NUL' : '/dev/null';
 
-// Locate the installed Google Chrome across macOS / Windows / Linux. Override with
-// LENS_CHROME=/path/to/chrome (or chrome.exe). Returns the first path that exists.
-function findChrome() {
-  if (process.env.LENS_CHROME) return process.env.LENS_CHROME;
-  const pf = process.env['ProgramFiles'] || 'C:\\Program Files';
-  const pfx86 = process.env['ProgramFiles(x86)'] || 'C:\\Program Files (x86)';
-  const local = process.env['LOCALAPPDATA'] || path.join(os.homedir(), 'AppData', 'Local');
-  const candidates = IS_WIN ? [
-    path.join(pf, 'Google\\Chrome\\Application\\chrome.exe'),
-    path.join(pfx86, 'Google\\Chrome\\Application\\chrome.exe'),
-    path.join(local, 'Google\\Chrome\\Application\\chrome.exe'),
-    path.join(pf, 'Google\\Chrome Beta\\Application\\chrome.exe'),
-    path.join(pf, 'Chromium\\Application\\chrome.exe'),
-  ] : process.platform === 'darwin' ? [
-    '/Applications/Google Chrome.app/Contents/MacOS/Google Chrome',
-    '/Applications/Google Chrome Beta.app/Contents/MacOS/Google Chrome Beta',
-    '/Applications/Chromium.app/Contents/MacOS/Chromium',
-  ] : [
-    '/usr/bin/google-chrome', '/usr/bin/google-chrome-stable', '/opt/google/chrome/chrome',
-    '/usr/bin/chromium', '/usr/bin/chromium-browser', '/snap/bin/chromium',
-  ];
-  for (const c of candidates) { try { if (fs.existsSync(c)) return c; } catch (_) {} }
-  return 'google-chrome'; // last resort: hope it's on PATH
-}
+// Locate the installed Google Chrome (shared with the tests). Override with LENS_CHROME.
 const CHROME = findChrome();
 
 // Match the UA + Client Hints to the REAL installed Chrome so Google serves the normal
@@ -118,7 +97,6 @@ const DEBUG = process.env.LENS_DEBUG === '1';
 const dbg = (...a) => { if (DEBUG) console.error('DEBUG', ...a); };
 
 const sleep = ms => new Promise(r => setTimeout(r, ms));
-const curl = args => execFileSync('curl', args, { timeout: 60000 }).toString();
 const out = o => { console.log(JSON.stringify(o)); process.exit(0); };
 const fail = m => out({ ok: false, error: m });
 const skip = () => out({ ok: false, cancelled: true });
@@ -170,28 +148,45 @@ async function prepPage(page, cookies) {
   if (cookies && cookies.length) { try { await page.setCookie(...cookies); } catch (_) {} }
 }
 
-// Upload the image to Lens the way the website does -> { results URL, session cookies }.
-function uploadImage() {
-  const jar = path.join(CACHE_DIR, 'cookies.txt');
-  if (!fs.existsSync(jar)) {
-    fs.writeFileSync(jar, '# Netscape HTTP Cookie File\n' +
-      '.google.com\tTRUE\t/\tTRUE\t2147483647\tSOCS\tCAESEwgDEgk0ODE3Nzk3MjQaAmVuIAEaBgiA_LyaBg\n' +
-      '.google.com\tTRUE\t/\tFALSE\t2147483647\tCONSENT\tYES+1\n');
-  }
-  let url;
-  try {
-    curl(['-sS', '--compressed', '-A', UA, '-b', jar, '-c', jar, '-o', NULL_DEVICE, 'https://www.google.com/']);
-    url = curl(['-sS', '--compressed', '-L', '-A', UA, '-b', jar, '-c', jar,
-      '-H', 'Origin: https://www.google.com', '-H', 'Referer: https://www.google.com/',
-      '-F', 'encoded_image=@' + img + ';type=image/jpeg', '-o', NULL_DEVICE, '-w', '%{url_effective}',
-      'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=' + Date.now()]).trim();
-  } catch (e) { fail('upload failed: ' + e.message); }
-  if (!/[?&]vsrid=/.test(url)) fail('upload rejected (no results URL)');
-  const cookies = fs.readFileSync(jar, 'utf8').split('\n')
-    .map(l => l.replace(/^#HttpOnly_/, '')).filter(l => l && !l.startsWith('#'))
-    .map(l => { const p = l.split('\t'); return p.length >= 7 ? { name: p[5], value: p[6], domain: p[0], path: p[2], secure: p[3] === 'TRUE' } : null; })
-    .filter(Boolean);
-  return { url, cookies };
+// Upload the image INSIDE the visible Chrome — the same session that then views the
+// results. We open Lens, build our OWN tiny upload form (createElement only, never
+// innerHTML) that posts to the public upload endpoint the website uses, let puppeteer put
+// the file on it, and submit: the browser navigates to the results in-session, exactly the
+// way a manual upload does. This replaces an out-of-band curl upload whose separate cookie
+// jar Google no longer honors on this fresh profile ("image not associated with your
+// account"). No scraping — we still read only the user's selection. Returns nothing; the
+// page is left on the Lens results (or fails hard if no results URL came back).
+async function uploadInBrowser(page, imgPath) {
+  // Warm up on google.com in the (persistent, visible) profile so the upload runs inside an
+  // ordinary session — cookies are .google.com-wide, so they reach lens.google.com too. We
+  // do NOT fabricate a consent cookie: if Google shows a consent screen (mostly EU) the user
+  // handles it in the visible window and the persistent profile remembers it thereafter.
+  await page.goto('https://www.google.com/', { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+  // Build our OWN upload form (createElement only, never innerHTML) posting to the public
+  // endpoint the website uses, and submit it as a top-level navigation to the results.
+  await page.evaluate(() => {
+    const f = document.createElement('form');
+    f.id = '__stUploadForm';
+    f.method = 'POST';
+    f.enctype = 'multipart/form-data';
+    f.action = 'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st=' + Date.now();
+    const i = document.createElement('input');
+    i.type = 'file';
+    i.name = 'encoded_image';
+    i.id = '__stUploadFile';
+    f.appendChild(i);
+    document.documentElement.appendChild(f);
+  });
+  const input = await page.$('#__stUploadFile');
+  if (!input) return fail('could not build the Lens upload form');
+  await input.uploadFile(imgPath);
+  await Promise.all([
+    page.waitForNavigation({ waitUntil: 'domcontentloaded', timeout: 60000 }).catch(() => {}),
+    page.evaluate(() => document.getElementById('__stUploadForm').submit()),
+  ]);
+  const landed = page.url();
+  dbg('in-browser upload landed on:', landed);
+  if (!/[?&]vsrid=/.test(landed)) fail('upload rejected (no results URL) — landed on ' + landed);
 }
 
 // Poll the page for the user's Tag (window.__stTag) or Skip (window.__stSkip), or time out.
@@ -220,11 +215,6 @@ async function waitForTag(page) {
 
   if (!img || (!TEST_URL && !fs.existsSync(img))) fail('image not found: ' + img);
 
-  let url, cookies = [];
-  if (TEST_URL) { url = TEST_URL; }
-  else { const u = uploadImage(); url = u.url; cookies = u.cookies; }
-  dbg('results URL:', url);
-
   let browser = null;
   try {
     browser = await connectWindow(true);
@@ -232,9 +222,14 @@ async function waitForTag(page) {
     // single visible tab and the overlay's evaluateOnNewDocument can't accumulate.
     const page = await browser.newPage();
     for (const p of await browser.pages()) { if (p !== page) { try { await p.close(); } catch (_) {} } }
-    await prepPage(page, cookies);
+    await prepPage(page);
     await page.evaluateOnNewDocument(assistOverlayInjector, POS || null);
-    await page.goto(url, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    // TEST_URL points at a local fake Google (offline tests); otherwise upload in-session.
+    if (TEST_URL) {
+      await page.goto(TEST_URL, { waitUntil: 'domcontentloaded', timeout: 45000 }).catch(() => {});
+    } else {
+      await uploadInBrowser(page, img);
+    }
     const outcome = await waitForTag(page);
     dbg('assist outcome:', outcome.via, outcome.name || '');
     try { browser.disconnect(); } catch (_) {}   // leave the window open for the next photo / close step

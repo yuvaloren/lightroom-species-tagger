@@ -10,7 +10,7 @@
     "node": ">=18"
   },
   "scripts": {
-    "test": "node test/integration.test.js"
+    "test": "node test/overlay-selection.test.js && node test/integration.test.js"
   },
   "dependencies": {
     "puppeteer-core": "^23"
