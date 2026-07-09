@@ -125,6 +125,7 @@ Everything is driven by scripts at the repo root (macOS; on Windows use WSL
 for the dev toolchain — Windows *end users* just download the release):
 
 ```
+./release.sh       # ONE command: clean checkout -> signed, notarized, distributable zip
 ./install.sh       # one-shot: toolchain + Lens helper deps + build + install a copy into Lightroom
 ./dev-setup.sh     # just the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
 ./build.sh         # build output/dist/SpeciesTagger.lrplugin (+ zip + checksums)
@@ -139,6 +140,7 @@ just test          # busted unit specs
 just lens-test     # drive the real Lens helper against a fake Google (needs Chrome)
 just build         # compose the bundle, version-stamp, zip + checksums
 just install       # build + install a full plugin copy into ~/Documents/Lightroom Plugins (Add/Reload)
+just release       # the one-command signed + notarized release (= ./release.sh)
 ```
 
 There is no build step to memorise and **no AI in the loop**: `just check` is the

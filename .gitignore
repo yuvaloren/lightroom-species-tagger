@@ -19,6 +19,10 @@
 # Not "output"; it's your installed dev env. `just clean-all` removes it.
 /.lua-env/
 
+# LOCAL signing config sourced by release.sh (Developer ID identity + notary profile refs).
+# Never commit — it's per-machine and references your signing setup.
+/scripts/signing.env
+
 # Test coverage artifacts.
 luacov.stats.out
 luacov.report.out

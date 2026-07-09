@@ -81,3 +81,9 @@ clean:
 # (re-create them with ./dev-setup.sh and `cd scripts/lens && npm ci`)
 clean-all: clean
     rm -rf .lua-env scripts/lens/node_modules
+
+# ONE command: clean checkout -> signed, notarized, distributable zip in output/dist/.
+# Universal Node + Developer ID sign + notarize + package. Pass --allow-unsigned before the
+# Developer ID exists; signing config via env or a gitignored scripts/signing.env (docs/SIGNING.md).
+release *ARGS:
+    bash release.sh {{ARGS}}

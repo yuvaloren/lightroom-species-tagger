@@ -195,10 +195,10 @@ local function node_platforms()
 	local env = os.getenv( 'ST_NODE_PLATFORMS' )
 	if env and env:gsub( '%s', '' ) ~= '' then
 		local list = {}
-		for k in env:gmatch( '[^,]+' ) do
-			k = ( k:gsub( '%s', '' ) )
-			if not NODE_PLATFORMS[ k ] then die( 'unknown ST_NODE_PLATFORMS entry: ' .. k ) end
-			list[ #list + 1 ] = k
+		for entry in env:gmatch( '[^,]+' ) do
+			local key = ( entry:gsub( '%s', '' ) )
+			if not NODE_PLATFORMS[ key ] then die( 'unknown ST_NODE_PLATFORMS entry: ' .. key ) end
+			list[ #list + 1 ] = key
 		end
 		return list
 	end

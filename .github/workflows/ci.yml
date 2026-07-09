@@ -120,12 +120,69 @@ jobs:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: cd scripts/lens && npm test
 
-  # ── Release (v* tags only): publish ONLY if both build and lens-helper are green ──
-  # Separate, least-privilege job so a tag can never publish a GitHub Release while
-  # the integration test that drives the real Lens helper is red.
-  release:
+  # ── macOS: universal-Node + Developer ID sign + notarize (v* tags only) ───────
+  # Turns the composed bundle into the signed, notarized release zip that actually
+  # runs on a downloader's Mac — an unsigned, quarantined Node binary is Gatekeeper-
+  # blocked on first launch. Composes on the runner (so it has the arm64 slice to
+  # lipo against), then hands off to scripts/sign-macos.sh. Inert until the signing
+  # secrets exist (see docs/SIGNING.md): with none set the sign step fails, so a tag
+  # never ships an unsigned zip; regular push/PR CI is unaffected (tag-gated).
+  notarize-macos:
     if: startsWith(github.ref, 'refs/tags/v')
     needs: [build, lens-helper]
+    runs-on: macos-14
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - uses: leafo/gh-actions-lua@v10
+        with:
+          luaVersion: "5.1.5"
+      - uses: leafo/gh-actions-luarocks@v4
+      - name: Install the Lua build dependency
+        run: luarocks install luafilesystem
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: npm
+          cache-dependency-path: scripts/lens/package-lock.json
+      - name: Bundle the Lens helper deps
+        run: cd scripts/lens && npm ci
+
+      - name: Compose the release bundle (darwin arm64 + win-x64)
+        run: lua build/build.lua --no-zip
+        env:
+          GITHUB_REF_NAME: ${{ github.ref_name }}
+          GITHUB_RUN_NUMBER: ${{ github.run_number }}
+          ST_NODE_PLATFORMS: darwin-arm64,win-x64
+
+      - name: Universal Node + sign + notarize + package
+        run: bash scripts/sign-macos.sh
+        env:
+          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
+          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
+          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
+          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
+          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
+          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
+          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
+
+      - name: Upload the signed bundle
+        uses: actions/upload-artifact@v4
+        with:
+          name: lrplugin-signed
+          path: |
+            output/dist/*.zip
+            output/dist/checksums.txt
+
+  # ── Release (v* tags only): publish ONLY if build, lens-helper, and notarize are green ──
+  # Separate, least-privilege job so a tag can never publish a GitHub Release while a
+  # gate is red. Publishes the macOS-signed bundle (the one that runs on a downloader's Mac).
+  release:
+    if: startsWith(github.ref, 'refs/tags/v')
+    needs: [build, lens-helper, notarize-macos]
     runs-on: ubuntu-latest
     permissions:
       contents: write # create the GitHub Release and upload assets
@@ -134,10 +191,10 @@ jobs:
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
 
-      - name: Download the built bundle
+      - name: Download the signed bundle
         uses: actions/download-artifact@v4
         with:
-          name: lrplugin
+          name: lrplugin-signed
           path: output/dist
 
       - name: Generate release notes
