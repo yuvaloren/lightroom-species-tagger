@@ -44,13 +44,13 @@ keywords too.
 
 ## Install (from a release)
 
-You need **Node.js** and **Google Chrome** installed (that's what runs the Lens
-search). Then:
+You only need **Google Chrome** installed (that's what shows the Lens results you
+tag from). Then:
 
 1. Download the latest `SpeciesTagger.lrplugin-*.zip` from
    [Releases](https://github.com/yoren/lightroom-species-tagger/releases) and unzip.
-   The bundle is **self-contained** — the Lens helper's dependencies are already
-   inside it, so there's nothing to `npm install`.
+   The bundle is **self-contained** — it ships its own Node runtime *and* the Lens
+   helper's dependencies, so there's no Node to install and nothing to `npm install`.
 2. Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select the
    `SpeciesTagger.lrplugin` folder.
 3. The first time you run it, a short **welcome** lists every setting and where to

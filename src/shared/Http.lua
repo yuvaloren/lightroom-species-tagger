@@ -52,7 +52,8 @@ end
 -- installed Chrome to render the results and prints one JSON line { ok, name }
 -- (or { ok = false, cancelled|error }).
 -- Everything below is cross-platform: the command is built for the POSIX shell on
--- macOS/Linux and for cmd.exe on Windows (WIN_ENV). Needs Node + Google Chrome.
+-- macOS/Linux and for cmd.exe on Windows (WIN_ENV). Node ships with the plugin (bundled
+-- per-OS binary, preferred by resolveNode); the user supplies only Google Chrome.
 
 -- rawget so these load headless (tests) where the Lightroom globals are absent.
 local function isWindows() return rawget( _G, 'WIN_ENV' ) == true end
@@ -69,13 +70,38 @@ end
 
 local function fileExists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
 
--- Resolve `node` to a real path. Lightroom's GUI gets a minimal PATH, so probe the
--- usual per-platform install locations before falling back to a bare "node" (found via
--- PATH). No user setting: Node discovery is automatic.
-local function resolveNode( isWin )
+-- Candidate paths for the Node runtime BUNDLED inside the plugin, most-preferred first.
+-- The build vendors Node under <plugin>/node/<os-arch>/node[.exe] so recognition works
+-- with only Chrome installed — nothing else for the user to set up. Pure (no I/O) for
+-- testability. Lightroom's sandboxed Lua has no os.getenv / uname, so we can't read the
+-- CPU arch here; instead we list the per-OS arch keys and let resolveNode take the first
+-- that's actually present. Unambiguous as long as a bundle carries at most ONE arch per
+-- OS (the norm — see build.lua's node_platforms; a fat multi-arch-per-OS bundle would
+-- need a runtime arch probe).
+local function bundledNodeCandidates( isWin, pluginPath )
+	if not pluginPath or pluginPath == '' then return {} end
+	local sep = isWin and '\\' or '/'
+	local keys = isWin and { 'win-arm64', 'win-x64' }
+		or { 'darwin-arm64', 'darwin-x64' }
+	local binName = isWin and 'node.exe' or 'node'
+	local out = {}
+	for _, key in ipairs( keys ) do
+		out[ #out + 1 ] = table.concat( { pluginPath, 'node', key, binName }, sep )
+	end
+	return out
+end
+
+-- Resolve `node` to a real path. Prefer the copy bundled in the plugin (above); then the
+-- usual per-platform system install locations; then a bare "node" on PATH. Lightroom's
+-- GUI gets a minimal PATH, so the explicit fixed paths come before the bare-name fallback
+-- (the official Node MSI installs to Program Files and adds nodejs to PATH).
+local function resolveNode( isWin, pluginPath )
+	for _, p in ipairs( bundledNodeCandidates( isWin, pluginPath ) ) do
+		if fileExists( p ) then return p end
+	end
 	local candidates = isWin
-		and { ( os.getenv( 'ProgramFiles' ) or 'C:\\Program Files' ) .. '\\nodejs\\node.exe',
-			( os.getenv( 'ProgramW6432' ) or 'C:\\Program Files' ) .. '\\nodejs\\node.exe' }
+		and { 'C:\\Program Files\\nodejs\\node.exe',
+			'C:\\Program Files (x86)\\nodejs\\node.exe' }
 		or { '/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node' }
 	for _, p in ipairs( candidates ) do if fileExists( p ) then return p end end
 	return 'node'
@@ -89,16 +115,21 @@ local function runHelper( node, helper, argv, env, errFile )
 	local LrPathUtils = import 'LrPathUtils'
 	local LrFileUtils = import 'LrFileUtils'
 	local json = require 'dkjson'
+	local Log = require 'Log'
 	local isWin = isWindows()
 	local q = function( s ) return shQuote( s, isWin ) end
 	if not fileExists( helper ) then return nil, 'Lens helper not found at ' .. tostring( helper ) end
 
 	local tmpDir = LrPathUtils.getStandardFilePath( 'temp' )
 	local out = LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.json', os.time() ) )
+	-- Always capture the helper's stderr (to the caller's file, or our own temp) so a launch
+	-- failure — node/Chrome/puppeteer missing, or a JS throw — surfaces in the error below
+	-- instead of a bare "no output". Ignored on the happy path.
+	local ownErr = errFile == nil
+	local errPath = errFile or LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.err', os.time() ) )
 	local args = { q( node ), q( helper ) }
 	for _, a in ipairs( argv ) do args[ #args + 1 ] = a.raw and tostring( a.value ) or q( a.value ) end
-	local errRedir = '2> ' .. ( errFile and q( errFile ) or ( isWin and 'NUL' or '/dev/null' ) )
-	local invocation = table.concat( args, ' ' ) .. ' > ' .. q( out ) .. ' ' .. errRedir
+	local invocation = table.concat( args, ' ' ) .. ' > ' .. q( out ) .. ' 2> ' .. q( errPath )
 
 	local batPath
 	if isWin then
@@ -124,11 +155,22 @@ local function runHelper( node, helper, argv, env, errFile )
 	local f = io.open( out, 'rb' )
 	local body = f and f:read( '*a' )
 	if f then f:close() end
+	local ef = io.open( errPath, 'rb' )
+	local errText = ef and ef:read( '*a' )
+	if ef then ef:close() end
 	LrFileUtils.delete( out )
+	if ownErr then LrFileUtils.delete( errPath ) end
 	if batPath then LrFileUtils.delete( batPath ) end
+	-- A short, redacted one-line snippet of the helper's stderr to append to failure messages.
+	local function errHint()
+		if not errText or errText:match( '^%s*$' ) then return '' end
+		local oneLine = errText:gsub( '%s+', ' ' )
+		oneLine = oneLine:gsub( '^ ', '' )
+		return ' — helper stderr: ' .. Log.redact( oneLine ):sub( 1, 300 )
+	end
 	if not body or body == '' then
-		return nil, 'Google Lens helper produced no output — is Node and Google Chrome installed? ' ..
-			'(see scripts/lens/README).'
+		return nil, 'Google Lens helper produced no output — is Google Chrome installed? ' ..
+			'(see scripts/lens/README).' .. errHint()
 	end
 	-- The helper prints ONE line of JSON on stdout. If that comes back truncated or
 	-- garbled, surface a diagnosable message (with the first chunk of what we got)
@@ -137,7 +179,7 @@ local function runHelper( node, helper, argv, env, errFile )
 	if type( decoded ) ~= 'table' then
 		local snippet = body:sub( 1, 200 ):gsub( '%s+', ' ' )
 		return nil, 'Google Lens helper returned unreadable output' ..
-			( derr and ( ' (' .. tostring( derr ) .. ')' ) or '' ) .. ': ' .. snippet
+			( derr and ( ' (' .. tostring( derr ) .. ')' ) or '' ) .. ': ' .. snippet .. errHint()
 	end
 	return decoded
 end
@@ -166,7 +208,7 @@ end
 function M.lensAssistAdapter( opts )
 	opts = opts or {}
 	local helper = opts.helperPath
-	local node = resolveNode( isWindows() )
+	local node = resolveNode( isWindows(), opts.pluginPath )
 	local port = opts.tabsPort and tostring( opts.tabsPort ) or nil
 
 	return {
@@ -191,6 +233,7 @@ M._test = {
 	toLrHeaders = toLrHeaders,
 	shQuote = shQuote,
 	resolveNode = resolveNode,
+	bundledNodeCandidates = bundledNodeCandidates,
 	interpretTagResult = interpretTagResult,
 }
 

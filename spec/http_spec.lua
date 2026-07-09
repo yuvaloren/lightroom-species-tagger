@@ -31,6 +31,25 @@ describe( 'Http._test.resolveNode', function()
 	end )
 end )
 
+describe( 'Http._test.bundledNodeCandidates', function()
+	it( 'lists the Windows bundle paths (arm64 preferred) under <plugin>/node/', function()
+		assert.same( {
+			'C:\\P\\SpeciesTagger.lrplugin\\node\\win-arm64\\node.exe',
+			'C:\\P\\SpeciesTagger.lrplugin\\node\\win-x64\\node.exe',
+		}, T.bundledNodeCandidates( true, 'C:\\P\\SpeciesTagger.lrplugin' ) )
+	end )
+	it( 'lists the macOS bundle paths (arm64 preferred)', function()
+		assert.same( {
+			'/p/SpeciesTagger.lrplugin/node/darwin-arm64/node',
+			'/p/SpeciesTagger.lrplugin/node/darwin-x64/node',
+		}, T.bundledNodeCandidates( false, '/p/SpeciesTagger.lrplugin' ) )
+	end )
+	it( 'is empty when no plugin path is given (headless / pure runs)', function()
+		assert.same( {}, T.bundledNodeCandidates( true, nil ) )
+		assert.same( {}, T.bundledNodeCandidates( false, '' ) )
+	end )
+end )
+
 describe( 'Http._test.interpretTagResult (helper stdout -> tag() contract)', function()
 	it( 'returns the highlighted name on a successful tag', function()
 		local name, err = T.interpretTagResult( { ok = true, name = 'Octopus cyanea' } )

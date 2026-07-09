@@ -39,7 +39,7 @@ function M.sectionsForTopOfDialog( f, _ )
 			f:static_text {
 				title = 'Free — no API key. Opens your installed Google Chrome to show Google Lens ' ..
 					'results; you highlight the species and press Tag, and the name is resolved through ' ..
-					'GBIF. The plugin never reads Google’s results for you. Needs Node.js + Chrome. ' ..
+					'GBIF. The plugin never reads Google’s results for you. Needs only Google Chrome. ' ..
 					'See docs/PRIVACY.md.',
 				wrap = true, width = 540, height_in_lines = 3,
 			},

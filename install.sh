@@ -35,8 +35,9 @@ if [[ -f scripts/lens/package.json ]]; then
 		say "installing the Google Lens helper deps (cd scripts/lens && npm i)"
 		( cd scripts/lens && npm i ) || say "WARNING: 'npm i' failed — recognition won't work until it succeeds. Re-run after fixing Node/npm."
 	else
-		say "WARNING: npm not found — skipping the Google Lens helper deps."
-		say "         Recognition needs Node.js + Google Chrome; install Node, then re-run."
+		say "WARNING: npm not found — needed HERE (build machine) to bundle the Lens helper's"
+		say "         deps into the plugin. Install Node/npm, then re-run. (End users need"
+		say "         only Google Chrome; Node ships inside the built plugin.)"
 	fi
 fi
 
@@ -46,4 +47,4 @@ say "building the plugin and installing a full copy for Lightroom"
 lua build/build.lua --install
 
 say "done — follow the Plug-in Manager steps above. Recognition uses Google Lens"
-say "(free, no key) and needs Node.js + Google Chrome installed."
+say "(free, no key) and needs only Google Chrome installed (Node ships in the plugin)."

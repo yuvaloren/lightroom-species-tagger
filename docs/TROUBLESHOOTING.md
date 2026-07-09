@@ -7,10 +7,12 @@ Add it again**, or simply **restart Lightroom Classic**. A plain Reload is enoug
 existing files changed.
 
 ### The Lens window doesn't open / “helper produced no output”
-The Lens step opens your installed Chrome via a bundled Node helper. Check:
-- **Node + Chrome installed.** The released bundle ships the helper's deps, so there's
-  nothing to `npm install`. The helper finds Chrome and Node automatically on
-  macOS / Windows / Linux.
+The Lens step opens your installed Chrome via a helper that runs on the plugin's own
+bundled Node runtime. Check:
+- **Google Chrome installed.** Node ships inside the plugin (per-OS binary) and the helper's
+  deps are bundled too, so there's no Node to install and nothing to `npm install`. The
+  helper finds your Chrome automatically on macOS / Windows / Linux (override with
+  `LENS_CHROME`).
 - Run from a normal home (residential) connection — Google challenges datacenter/VPN/shared
   IPs. If an "are you human" check appears, solve it yourself in the window, then highlight
   and Tag as usual.

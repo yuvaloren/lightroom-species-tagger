@@ -33,9 +33,9 @@ This repository already produces the artifact you'd distribute. The CI workflow
 ([`.github/workflows/ci.yml`](../.github/workflows/ci.yml)) runs on every push,
 but a tag that matches `v*` additionally builds and publishes a **GitHub
 Release**: it version-stamps the bundle, zips it, writes `checksums.txt`, and
-attaches both. The bundle is **self-contained** — the Lens helper's Node
-dependencies (`puppeteer-core`) are already inside it, so users unzip and run
-with nothing to `npm install`.
+attaches both. The bundle is **self-contained** — it ships its own per-OS Node
+runtime *and* the Lens helper's dependencies (`puppeteer-core`), so users unzip
+and run with only Google Chrome: no Node to install, nothing to `npm install`.
 
 To cut a release:
 

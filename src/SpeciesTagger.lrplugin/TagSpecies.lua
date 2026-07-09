@@ -92,7 +92,7 @@ local function firstRunWelcome()
 			'Google’s results for you.',
 		'',
 		'Settings live in  File ▸ Plug-in Manager ▸ Species Tagger  (keyword style, keyword ' ..
-			'root, export). Recognition needs Node.js and Google Chrome installed.',
+			'root, export). Recognition needs only Google Chrome installed.',
 		'',
 		'Run it from  Library ▸ Plug-in Extras ▸ Identify and Tag Species.',
 	}, '\n' ), 'info' )
@@ -119,6 +119,7 @@ function M.run( _ )
 
 	local assist = Http.lensAssistAdapter {
 		helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
+		pluginPath = _PLUGIN.path,
 		tabsPort = ASSIST_PORT,
 	}
 	local resolveDeps = { http = Http.lrAdapter(), cache = {} } -- shared GBIF cache for the run
