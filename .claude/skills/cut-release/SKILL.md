@@ -58,9 +58,13 @@ a red Lens test means the release ships broken code. Don't work around it; fix t
 
 ## Verify after
 
-- The Release exists with **four assets**: `SpeciesTagger-<ver>-mac.zip`,
-  `SpeciesTagger-<ver>-win.zip`, `SpeciesTagger-<ver>-all.zip`, `checksums.txt`.
-- The README "Install (from a release)" download link resolves.
+- The Release exists with **six assets**: `SpeciesTagger-mac.pkg` and
+  `SpeciesTagger-win-setup.exe` (unversioned names — the wiki's evergreen
+  `releases/latest/download/` links depend on them), plus
+  `SpeciesTagger-<ver>-mac.zip`, `SpeciesTagger-<ver>-win.zip`,
+  `SpeciesTagger-<ver>-all.zip`, `checksums.txt`.
+- The wiki's two Download buttons and the README download links resolve
+  (release.sh syncs the wiki as its last step).
 - CI on the tag is fully green (it validates; it does not publish).
 
 If the drift guard failed the build, the tag, `VERSION`, and CHANGELOG heading disagree —
