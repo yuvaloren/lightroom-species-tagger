@@ -1,72 +1,56 @@
 ---
 name: cut-release
-description: Cut a tagged release of the plugin without tripping the CI version-drift guard, then publish it locally with release.sh. Use when shipping a new version, bumping VERSION, or when asked to "release", "tag a version", or "publish a release".
+description: Cut and publish a tagged release of the plugin. Use when shipping a new version, bumping VERSION, or when asked to "release", "tag a version", or "publish a release".
 ---
 
 # Cut a release
 
-Releases are **published locally by `./release.sh`** (sign + notarize + package +
-`gh release create`) — CI is validation-only and never signs or publishes (no signing
-secrets on GitHub; see docs/SIGNING.md). CI still enforces that three things agree on a
-`v*` tag — the git tag, the `VERSION` file, and a `CHANGELOG.md` heading. This skill does
-the steps in the order that never trips that guard.
-
-## Pre-flight
+The whole release is ONE human-runnable command — no AI required:
 
 ```bash
-just check                              # lint + tests + build must be green
+./release.sh                    # release VERSION-minus--dev (e.g. 0.3.0-dev -> 0.3.0)
+./release.sh --version=0.4.0    # minor/major jump instead
 ```
 
-Confirm the `build` and `lens-helper` CI jobs are green on the commit you're tagging —
-a red Lens test means the release ships broken code. Don't work around it; fix the test.
+It does, in order: pre-flight (clean tree on main, synced, gh authed) → write
+`VERSION` → reuse the hand-written `## [X.Y.Z]` CHANGELOG section or generate
+it from conventional commits (git-cliff) → lint + tests → the full artifact
+pipeline (sign + notarize + zips + stapled pkg + Windows installer) → **one
+y/N confirmation** → commit + tag + push → wait for CI green on the tag →
+`gh release create` with the six assets → wiki sync → verify the evergreen
+download links → reopen development at `X.Y.(Z+1)-dev`.
 
-## Steps
+Nothing irreversible happens before the confirmation; CI is validation-only
+and never signs or publishes (no signing secrets on GitHub — docs/SIGNING.md).
 
-1. **Choose the version** (SemVer: `MAJOR.MINOR.PATCH`).
-2. **Bump `VERSION`** to exactly that string (drop the `-dev` suffix used during
-   development):
-   ```
-   0.2.0
-   ```
-3. **Check the CHANGELOG heading.** A `## [0.2.0]` heading must exist (it's usually
-   written during development); finalize its text. CI greps for the exact heading.
-4. **Sanity-check the three agree** (this is exactly what CI's drift guard checks):
-   ```bash
-   test "$(tr -d '[:space:]' < VERSION)" = "0.2.0" && echo "VERSION ok"
-   grep -q '## \[0.2.0\]' CHANGELOG.md && echo "CHANGELOG heading ok"
-   ```
-5. **Commit** with a conventional message, then **tag and push**:
-   ```bash
-   git add VERSION CHANGELOG.md
-   git commit -m "chore(release): v0.2.0"
-   git tag v0.2.0
-   git push && git push --tags
-   ```
-6. **Wait for CI to go green on the tag** (build + lens-helper + the drift guard), then
-   **publish from the Mac**:
-   ```bash
-   ./release.sh                # sign + notarize + package + publish the GitHub Release
-   ```
-   `--no-publish` builds everything without creating the Release (dry run).
-   release.sh refuses to publish a `-dev` VERSION, an unsigned build, or a tag that
-   isn't at HEAD.
-7. **After publishing, reopen development**: bump `VERSION` to the next `X.Y.Z-dev`
-   in a follow-up commit.
+`--no-publish` is the dry run (build the current tree, no bump/tag/publish);
+`--yes` skips the confirmation for unattended runs.
 
-> Tagging + pushing is a maintainer action and irreversible on a public remote —
-> only do it when explicitly asked, and never invent a version.
+## If something fails
+
+- **Before the y/N prompt** (lint, tests, build, notarization): nothing was
+  committed or pushed. `VERSION`/`CHANGELOG.md` edits may sit in the working
+  tree — `git checkout -- VERSION CHANGELOG.md` discards them. Fix and re-run.
+- **CI gate red after the tag push**: fix the problem, then
+  ```bash
+  git tag -d vX.Y.Z && git push --delete origin vX.Y.Z
+  ```
+  and re-run `./release.sh` (the release commit is already on main; pass
+  `--version=X.Y.Z` since VERSION no longer ends in -dev).
+- **After publish** (verify/reopen steps): the Release is live; finish the
+  remaining steps by hand (`printf 'X.Y.Z+1-dev\n' > VERSION`, commit
+  `chore: reopen development at …`, push).
 
 ## Verify after
 
-- The Release exists with **six assets**: `SpeciesTagger-mac.pkg` and
+- The Release shows **six assets**: `SpeciesTagger-mac.pkg` and
   `SpeciesTagger-win-setup.exe` (unversioned names — the wiki's evergreen
   `releases/latest/download/` links depend on them), plus
   `SpeciesTagger-<ver>-mac.zip`, `SpeciesTagger-<ver>-win.zip`,
   `SpeciesTagger-<ver>-all.zip`, `checksums.txt`.
-- The wiki's two Download buttons and the README download links resolve
-  (release.sh syncs the wiki as its last step).
-- CI on the tag is fully green (it validates; it does not publish).
+  (release.sh's verify stage asserts all of this automatically.)
+- The wiki's two Download buttons resolve.
+- CI on the tag is fully green.
 
-If the drift guard failed the build, the tag, `VERSION`, and CHANGELOG heading disagree —
-fix them, delete the bad tag (`git tag -d v0.2.0 && git push --delete origin v0.2.0`),
-and redo from step 4.
+> Tagging + pushing is a maintainer action and irreversible on a public
+> remote — only release when Yuval explicitly asks, and never invent a version.
