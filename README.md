@@ -59,7 +59,7 @@ You must have **Google Chrome** and **Adobe Lightroom Classic** installed.
    folder for the current user, so there are **no Plug-in Manager steps**.
 2. Start (or restart) Lightroom Classic.
 3. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
-   Tag Species**.
+   Tag Species** (also under **File ▸ Plug-in Extras** in any module).
 
 > **Windows note (temporary):** the installer isn't code-signed yet, so SmartScreen
 > may show *"Windows protected your PC"* — click **More info ▸ Run anyway**. (The
@@ -99,7 +99,9 @@ To uninstall: **Windows** — Settings ▸ Apps ▸ Species Tagger (or run
 ## Using it
 
 Select one or more photos and run **Library ▸ Plug-in Extras ▸ Identify and Tag
-Species**. For each photo a Chrome window opens showing Google's real results page,
+Species** (the command also lives under **File ▸ Plug-in Extras**, visible from
+any module, and **Help ▸ Plug-in Extras** has a quick-start summary). For each
+photo a Chrome window opens showing Google's real results page,
 with a small **Species Tagger** bar across the bottom. Then:
 
 1. **Read the results.** Refine them in **Google's own search box** if you like (add

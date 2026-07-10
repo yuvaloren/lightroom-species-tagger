@@ -1,7 +1,10 @@
 --[[----------------------------------------------------------------------------
 Info.lua — Lightroom plugin manifest for Species Tagger.
 
-Adds a "Identify and Tag Species" command under Library > Plug-in Extras and a
+Adds the "Identify and Tag Species" command under BOTH Library > Plug-in Extras
+and File > Plug-in Extras (the File menu is visible from every module — plugin
+commands may only live in File/Library/Help Plug-in Extras, so we take all the
+visibility the SDK offers), a "quick start" under Help > Plug-in Extras, and a
 settings panel in the Plug-in Manager. The VERSION table is stamped by
 build/build.lua at build time (do not hand-edit the numbers).
 ------------------------------------------------------------------------------]]
@@ -19,6 +22,22 @@ return {
 		{
 			title = LOC '$$$/SpeciesTagger/Menu=Identify and Tag Species…',
 			file = 'SpeciesTaggerMenuItem.lua',
+		},
+	},
+
+	-- Same command in File > Plug-in Extras: visible from EVERY module and the
+	-- first place most users look for plugin commands.
+	LrExportMenuItems = {
+		{
+			title = LOC '$$$/SpeciesTagger/Menu=Identify and Tag Species…',
+			file = 'SpeciesTaggerMenuItem.lua',
+		},
+	},
+
+	LrHelpMenuItems = {
+		{
+			title = LOC '$$$/SpeciesTagger/HelpMenu=Species Tagger quick start…',
+			file = 'SpeciesTaggerHelpItem.lua',
 		},
 	},
 
