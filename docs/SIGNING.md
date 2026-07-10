@@ -95,3 +95,42 @@ xattr -w com.apple.quarantine "0081;00000000;Safari;" \
 Or download the release zip through a browser and unzip it in Finder (double-click), which
 propagates the flag onto the extracted binary. An unsigned binary is blocked; a signed +
 notarized one is cleared by Gatekeeper's online check on first run.
+
+## Windows: Azure Trusted Signing (the installer .exe)
+
+The Windows story is split in two:
+
+- **The zips need no signing** — the bundled `node.exe` from nodejs.org already carries
+  the OpenJS Foundation's Authenticode signature.
+- **`SpeciesTagger-win-setup.exe`** (the NSIS installer) is ours, so SmartScreen judges
+  it by *our* signature. It is signed with **Azure Trusted Signing** by
+  `scripts/sign-win.sh`, which release.sh calls automatically — from the Mac, no
+  Windows box in the loop.
+
+How it works: `az account get-access-token` mints a **short-lived token** for the
+`codesigning.azure.net` resource; [jsign](https://ebourg.github.io/jsign/) (cross-platform
+Authenticode) sends the exe's digest to the Trusted Signing service, which signs with the
+certificate profile and returns the signature; jsign embeds it plus an RFC 3161 timestamp
+(`timestamp.acs.microsoft.com`). Trusted Signing certs rotate every ~3 days, so the
+timestamp is what keeps installers valid forever.
+
+One-time prerequisites:
+
+1. `brew install azure-cli jsign` (osslsigncode optional, for a local structural verify).
+2. An Azure **Trusted Signing account** + **certificate profile** (public-trust; needs
+   the one-time identity validation), and the signer identity holding the
+   **"Trusted Signing Certificate Profile Signer"** role.
+3. `az login` on the release Mac.
+4. In the gitignored `scripts/signing.env` (names, not secrets):
+
+   ```sh
+   ATS_ENDPOINT=<region>.codesigning.azure.net
+   ATS_ACCOUNT=<trusted-signing-account-name>
+   ATS_PROFILE=<certificate-profile-name>
+   ```
+
+No secrets are stored anywhere — the same "no signing secrets on GitHub, ever" rule as
+macOS: CI never signs; `./release.sh` on this Mac does. If the ATS_* variables are unset,
+sign-win.sh warns and ships the exe unsigned (one-time SmartScreen "More info ▸ Run
+anyway"). Authoritative verification is `Get-AuthenticodeSignature` on a Windows box;
+SmartScreen reputation with a Trusted Signing certificate is typically immediate-to-fast.
