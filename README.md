@@ -16,6 +16,12 @@ image.
 > and it uses only the name you highlight, in order to allow follow-up refinement and
 > comply with Google's terms of service.
 
+**Download the installer:**
+[**macOS** (.pkg — Apple Silicon & Intel)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-mac.pkg) ·
+[**Windows** (.exe)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-win-setup.exe) —
+run it, restart Lightroom, then **Library ▸ Plug-in Extras ▸ Identify and Tag Species**.
+Full guide on the [wiki](https://github.com/yuvaloren/lightroom-species-tagger/wiki).
+
 - [What it does](#what-it-does)
 - [Install (from a release)](#install-from-a-release)
 - [Using it](#using-it)
@@ -41,7 +47,29 @@ image.
 
 ## Install (from a release)
 
-You must have **Google Chrome** and **Adobe Lightroom Classic** installed. Then:
+You must have **Google Chrome** and **Adobe Lightroom Classic** installed.
+
+### The easy way — one-click installer
+
+1. Download and run the installer for your OS:
+   [**macOS** — `SpeciesTagger-mac.pkg`](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-mac.pkg)
+   (one universal build for Apple Silicon *and* Intel) or
+   [**Windows** — `SpeciesTagger-win-setup.exe`](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-win-setup.exe).
+   No admin rights needed; the plugin lands in Lightroom's auto-load `Modules`
+   folder for the current user, so there are **no Plug-in Manager steps**.
+2. Start (or restart) Lightroom Classic.
+3. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
+   Tag Species**.
+
+> **Windows note (temporary):** the installer isn't code-signed yet, so SmartScreen
+> may show *"Windows protected your PC"* — click **More info ▸ Run anyway**. (The
+> macOS installer is signed and notarized; Windows code signing is in progress.)
+
+To uninstall: **Windows** — Settings ▸ Apps ▸ Species Tagger (or run
+`Uninstall.exe` in the plugin folder); **macOS** — delete
+`~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`.
+
+### The manual way — zip + Plug-in Manager
 
 1. Download the zip for your OS from
    [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases):

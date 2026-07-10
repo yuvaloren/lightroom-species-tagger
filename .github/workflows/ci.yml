@@ -116,12 +116,35 @@ jobs:
           unzip -l "$ALL" | grep -q 'node\.exe' || { echo "::error::all zip is missing node.exe"; exit 1; }
           echo "zips ok: $(basename "$MAC") $(basename "$WIN") $(basename "$ALL")"
 
+      - name: Validate installer + wiki scripts
+        # Validation-only (like all of CI): compiles the REAL Windows installer
+        # from the just-built -win zip (unsigned — sign-win.sh skips without
+        # WIN_SIGN_CMD), and dry-checks the wiki page extraction. The macOS pkg
+        # needs pkgbuild/productbuild, so it's exercised by release.sh locally,
+        # not here; its script still gets a syntax pass.
+        run: |
+          set -euo pipefail
+          for s in scripts/build-pkg.sh scripts/build-win-installer.sh scripts/sign-win.sh scripts/sync-wiki.sh; do
+            bash -n "$s"
+          done
+          sudo apt-get -yq install nsis >/dev/null
+          bash scripts/build-win-installer.sh
+          test -f output/dist/SpeciesTagger-win-setup.exe
+          # wiki extraction: every generated page must be non-empty (guards
+          # against a README heading rename silently emptying a wiki page)
+          for h in "Install (from a release)" "Using it" "Settings"; do
+            n="$(awk -v h="## $h" '$0==h{on=1} on && $0!=h && /^## /{exit} on{print}' README.md | wc -l)"
+            [ "$n" -gt 2 ] || { echo "::error::README section '$h' extracted $n lines — sync-wiki would ship an empty page"; exit 1; }
+          done
+          echo "installer + wiki scripts ok"
+
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
         with:
           name: lrplugin
           path: |
             output/dist/*.zip
+            output/dist/*.exe
             output/dist/checksums.txt
 
   # ── Node: drive the REAL Lens helper against a local fake Google (no network) ──

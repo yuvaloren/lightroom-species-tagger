@@ -79,6 +79,9 @@ end
 
 local function firstRunWelcome()
 	LrDialogs.message( 'Species Tagger — Welcome', table.concat( {
+		'WHERE TO FIND IT:  select photos in the Library, then ' ..
+			'Library ▸ Plug-in Extras ▸ Identify and Tag Species.',
+		'',
 		'Species Tagger helps you tag the plants and animals in your photos with both the ' ..
 			'common and the Latin (scientific) name.',
 		'',
@@ -93,8 +96,6 @@ local function firstRunWelcome()
 		'',
 		'Settings live in  File ▸ Plug-in Manager ▸ Species Tagger  (keyword style, export). ' ..
 			'Recognition needs only Google Chrome installed.',
-		'',
-		'Run it from  Library ▸ Plug-in Extras ▸ Identify and Tag Species.',
 	}, '\n' ), 'info' )
 end
 

@@ -3,6 +3,37 @@
 *Lightroom Classic plugin. Planning doc — updated 2026-07-09. Pivoted to **sign + notarize
 the bundled binary**; native installers and Adobe Exchange are now optional later layers.*
 
+> **Update 2026-07-09 (evening) — the "native installers optional" call below is
+> REVERSED, prompted by the first real-user test** (install needed hand-holding; she
+> expected a Download button, not a Releases file list; and couldn't find the feature
+> until pointed at Library ▸ Plug-in Extras). Approved plan (Yuval, 2026-07-09):
+>
+> - **One-click installers**, both targeting Lightroom's auto-load `Modules` folder so
+>   Plug-in Manager never enters the flow. macOS: `scripts/build-pkg.sh` — signed
+>   (Developer ID Installer) + notarized + **stapled** `.pkg`, currentUserHome domain
+>   (no admin prompt), payload extracted from the signed `-mac` zip so packaging can't
+>   drift. Windows: `scripts/build-win-installer.sh` — NSIS via Homebrew `makensis`
+>   (cross-compiled on the Mac; release.sh stays one local command), per-user, with
+>   uninstaller + HKCU Apps entry; payload from the `-win` zip.
+> - **Evergreen asset names** `SpeciesTagger-mac.pkg` / `SpeciesTagger-win-setup.exe`
+>   (unversioned) so `releases/latest/download/…` links never break. The three
+>   versioned zips still ship (manual path + the `-all` Exchange package).
+> - **Windows signing = Azure Trusted Signing** (~$10/mo; Yuval's pick over unsigned/OV
+>   cert). PENDING the one-time Azure account + identity validation (needs Yuval in
+>   person). Until wired, `scripts/sign-win.sh` is a pluggable stub (`WIN_SIGN_CMD`)
+>   and the exe ships unsigned with a SmartScreen note in README/wiki. Open questions:
+>   individual eligibility for Trusted Signing; a signing CLI that runs from macOS
+>   (fallback: signtool on the Parallels VM invoked from release.sh).
+> - **GitHub wiki as the landing page**, generated — never hand-edited — from
+>   README/docs by `scripts/sync-wiki.sh` (authored wiki-only pages live in `wiki/`),
+>   pushed ONLY as the last step of a published release so public links never precede
+>   assets. One-time bootstrap: the first wiki page must be created once in the web UI.
+> - **Discoverability**: the "Library ▸ Plug-in Extras ▸ Identify and Tag Species" line
+>   is now the FIRST line of the first-run welcome, on both installers' finish screens,
+>   on the wiki Home (with a menu screenshot), and near the top of the README.
+> - CI validates installer/wiki scripts (compiles the real NSIS exe from the CI-built
+>   `-win` zip); signing still never happens in CI.
+
 > **Update 2026-07-10 — partially superseded by [PACKAGING-PLAN.md](PACKAGING-PLAN.md):**
 > releases now ship **three per-platform zips** (`SpeciesTagger-<ver>-mac/-win/-all.zip`;
 > the `-all` zip is the future Adobe Exchange package), and the "add the 7 signing secrets

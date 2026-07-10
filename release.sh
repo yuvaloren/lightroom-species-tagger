@@ -1,6 +1,8 @@
 #!/usr/bin/env bash
 # release.sh — ONE command: from a clean checkout to a signed, notarized,
-# PUBLISHED release (the three per-platform zips + checksums on a GitHub Release).
+# PUBLISHED release: the two one-click installers (SpeciesTagger-mac.pkg,
+# SpeciesTagger-win-setup.exe — unversioned names for evergreen links) + the
+# three per-platform zips + checksums on a GitHub Release, then the wiki sync.
 #
 #   ./release.sh                   # sign + notarize + package + publish to GitHub
 #   ./release.sh --no-publish      # everything except the GitHub Release (dry run)
@@ -67,6 +69,15 @@ ST_NODE_PLATFORMS=darwin-arm64,win-x64 bash build.sh --no-zip
 say "signing + packaging"
 bash scripts/sign-macos.sh ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}
 
+# 4b. One-click installers (payloads come FROM the zips — single packaging truth).
+# Unversioned asset names so the wiki's /releases/latest/download/ links are evergreen.
+say "building the macOS pkg installer"
+ALLOW_UNSIGNED="$ALLOW_UNSIGNED" bash scripts/build-pkg.sh
+say "building the Windows installer"
+bash scripts/build-win-installer.sh
+say "appending installer checksums"
+( cd output/dist && shasum -a 256 SpeciesTagger-mac.pkg SpeciesTagger-win-setup.exe >> checksums.txt )
+
 # 5. Publish the GitHub Release (all three zips + checksums.txt).
 if [ "$NO_PUBLISH" = "1" ]; then
 	say "release built (NOT published — --no-publish) -> output/dist/"
@@ -91,7 +102,9 @@ if command -v git-cliff >/dev/null 2>&1; then
 	NOTES_FILE="$(mktemp)"
 	git-cliff --config cliff.toml --latest --strip all -o "$NOTES_FILE" 2>/dev/null || NOTES_FILE=""
 fi
-ASSETS=( "output/dist/SpeciesTagger-$VERSION-mac.zip"
+ASSETS=( "output/dist/SpeciesTagger-mac.pkg"
+         "output/dist/SpeciesTagger-win-setup.exe"
+         "output/dist/SpeciesTagger-$VERSION-mac.zip"
          "output/dist/SpeciesTagger-$VERSION-win.zip"
          "output/dist/SpeciesTagger-$VERSION-all.zip"
          "output/dist/checksums.txt" )
@@ -102,3 +115,8 @@ else
 	gh release create "v$VERSION" "${ASSETS[@]}" --title "v$VERSION" --generate-notes
 fi
 say "published: $(gh release view "v$VERSION" --json url -q .url)"
+
+# 6. Sync the GitHub wiki (public!) — deliberately the LAST step, after the
+# release is live, so wiki download links never point at missing assets.
+say "syncing the GitHub wiki"
+bash scripts/sync-wiki.sh
