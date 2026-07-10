@@ -3,6 +3,40 @@
 All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and the project follows
 [Semantic Versioning](https://semver.org/).
+## [0.3.0] - 2026-07-10
+
+### Added
+
+- One-click installers, wiki pipeline, discoverability
+- Command in File AND Library Plug-in Extras; quick start in Help
+- Self-uninstall from the Help quick start (mac Modules installs); document disabled-state gotcha
+- Azure Trusted Signing for the Windows installer via jsign
+- One-command human release -- cut, gate, ship, verify, reopen
+
+### Changed
+
+- Single canonical location -- File > Plug-in Extras only
+- Move the button to the Plug-in Manager section
+- Clean is a plain rm -rf output (Yuval decision)
+
+### Chore
+
+- Reopen development at 0.3.0-dev
+
+### Documentation
+
+- PACKAGING-PLAN status — shipped as v0.2.1, v0.2.0 withdrawn
+- Plug-in Extras menu screenshot for Home + pkg conclusion screen
+- Menu screenshot now shows File > Plug-in Extras (single canonical location)
+- Fix screenshot alt text -- File menu
+- Cut-release verify list covers the six current assets + wiki sync
+
+### Fixed
+
+- ASCII-only ANSI NSI -- Homebrew makensis crashes on any Unicode build (NSIS bug #1165) and rejects UTF-8 script input; strings were ASCII already
+- Accept any win-* Node arch in the installer payload (CI composes win-arm64)
+- Clean can no longer fail on Finder .DS_Store recreation
+
 
 ## [0.2.1]
 
