@@ -9,45 +9,14 @@ have a real uninstaller (Settings > Apps), so we point there instead.
 ------------------------------------------------------------------------------]]
 
 local LrDialogs = import 'LrDialogs'
-local LrFileUtils = import 'LrFileUtils'
 local LrHttp = import 'LrHttp'
 local LrTasks = import 'LrTasks'
 
+local Uninstall = require 'Uninstall'
+
 local WIKI_URL = 'https://github.com/yuvaloren/lightroom-species-tagger/wiki'
 
--- True when this copy was placed by an installer into Lightroom's auto-load
--- Modules folder (vs. a manual unzip anywhere + Plug-in Manager ▸ Add).
-local function isModulesInstall()
-	local p = _PLUGIN.path:gsub( '\\', '/' )
-	return p:find( '/Adobe/Lightroom/Modules/', 1, true ) ~= nil
-end
-
-local function uninstallSelf()
-	local go = LrDialogs.confirm(
-		'Uninstall Species Tagger?',
-		'This moves the plug-in to the Trash. Your photos and their keywords '
-			.. 'are not touched. Restart Lightroom Classic to finish.',
-		'Move to Trash', 'Cancel' )
-	if go ~= 'ok' then return end
-	local ok, err = LrFileUtils.moveToTrash( _PLUGIN.path )
-	if ok then
-		LrDialogs.message( 'Species Tagger uninstalled',
-			'The plug-in is in the Trash. It disappears from the menus the '
-				.. 'next time you start Lightroom Classic.', 'info' )
-	else
-		LrDialogs.message( 'Could not uninstall',
-			'Moving the plug-in to the Trash failed ('
-				.. tostring( err ) .. ').\n\nYou can delete it by hand: '
-				.. _PLUGIN.path, 'critical' )
-	end
-end
-
 LrTasks.startAsyncTask( function()
-	local uninstallVerb = nil
-	if isModulesInstall() and MAC_ENV then
-		uninstallVerb = 'Uninstall…'
-	end
-
 	local lines = {
 		'1.  Select photos in the Library.',
 		'2.  Run  File ▸ Plug-in Extras ▸ Identify and Tag Species.',
@@ -60,23 +29,17 @@ LrTasks.startAsyncTask( function()
 		'',
 		'Settings:  File ▸ Plug-in Manager ▸ Species Tagger.',
 	}
-	if isModulesInstall() and WIN_ENV then
-		lines[ #lines + 1 ] = ''
-		lines[ #lines + 1 ] = 'To uninstall:  Windows Settings ▸ Apps ▸ Species Tagger.'
+	if Uninstall.isModulesInstall() then
+		if WIN_ENV then
+			lines[ #lines + 1 ] = 'Uninstall:  Windows Settings ▸ Apps ▸ Species Tagger.'
+		else
+			lines[ #lines + 1 ] = 'Uninstall:  File ▸ Plug-in Manager ▸ Species Tagger ▸ Uninstall.'
+		end
 	end
 
-	local choice
-	if uninstallVerb then
-		choice = LrDialogs.confirm( 'Species Tagger — quick start',
-			table.concat( lines, '\n' ), 'Open the full guide', 'Close', uninstallVerb )
-	else
-		choice = LrDialogs.confirm( 'Species Tagger — quick start',
-			table.concat( lines, '\n' ), 'Open the full guide', 'Close' )
-	end
-
+	local choice = LrDialogs.confirm( 'Species Tagger — quick start',
+		table.concat( lines, '\n' ), 'Open the full guide', 'Close' )
 	if choice == 'ok' then
 		LrHttp.openUrlInBrowser( WIKI_URL )
-	elseif choice == 'other' then
-		uninstallSelf()
 	end
 end )

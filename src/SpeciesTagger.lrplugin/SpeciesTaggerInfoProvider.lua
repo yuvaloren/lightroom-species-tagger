@@ -6,10 +6,50 @@ controls. Defaults are seeded from Config.DEFAULTS on first open.
 
 local LrView = import 'LrView'
 local LrPrefs = import 'LrPrefs'
+local LrTasks = import 'LrTasks'
 
 local Config = require 'Config'
+local Uninstall = require 'Uninstall'
 
 local M = {}
+
+-- Uninstall lives HERE because this is where users look: Lightroom's own
+-- Remove button sits right in this dialog but is permanently greyed out for
+-- auto-load (Modules folder) installs. Manual installs keep using Remove, so
+-- for them this section only explains that.
+local function uninstallSection( f )
+	if Uninstall.isModulesInstall() then
+		local how
+		if WIN_ENV then
+			how = f:static_text {
+				title = 'Use Windows Settings ▸ Apps ▸ Species Tagger for Lightroom Classic. ' ..
+					'(Lightroom’s own Remove button doesn’t apply to installer-based plug-ins.)',
+				wrap = true, width = 540, height_in_lines = 2,
+			}
+		else
+			how = f:row {
+				f:push_button {
+					title = 'Uninstall Species Tagger…',
+					action = function()
+						LrTasks.startAsyncTask( function() Uninstall.run() end )
+					end,
+				},
+				f:static_text {
+					title = 'Moves the plug-in to the Trash. Photos and keywords are not touched.',
+				},
+			}
+		end
+		return { title = 'Uninstall', how }
+	end
+	return {
+		title = 'Uninstall',
+		f:static_text {
+			title = 'This copy was added manually: select it in the list on the left and use ' ..
+				'Lightroom’s Remove button, then delete the SpeciesTagger.lrplugin folder.',
+			wrap = true, width = 540, height_in_lines = 2,
+		},
+	}
+end
 
 function M.sectionsForTopOfDialog( f, _ )
 	local prefs = LrPrefs.prefsForPlugin()
@@ -64,6 +104,7 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:static_text { title = 'Version: ' .. version },
 			},
 		},
+		uninstallSection( f ),
 	}
 end
 

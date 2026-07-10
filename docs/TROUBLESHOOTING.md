@@ -9,8 +9,9 @@ affected.
 
 ### How do I uninstall?
 - **Windows:** Settings ▸ Apps ▸ **Species Tagger for Lightroom Classic** ▸ Uninstall.
-- **macOS:** **Help ▸ Plug-in Extras ▸ Species Tagger quick start… ▸ Uninstall…** — or
-  delete `~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`
+- **macOS:** **File ▸ Plug-in Manager ▸ Species Tagger ▸ Uninstall Species Tagger…**
+  (Lightroom's own Remove button is always greyed out for installer-based plug-ins) —
+  or delete `~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`
   and restart Lightroom.
 - **Manual (zip) installs:** File ▸ Plug-in Manager ▸ select Species Tagger ▸ **Remove**,
   then delete the unzipped folder.
