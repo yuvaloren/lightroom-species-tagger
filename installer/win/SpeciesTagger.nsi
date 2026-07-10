@@ -1,20 +1,28 @@
-; SpeciesTagger.nsi — Windows one-click installer for the Species Tagger
+; SpeciesTagger.nsi -- Windows one-click installer for the Species Tagger
 ; Lightroom Classic plugin.
 ;
 ; Installs SpeciesTagger.lrplugin into the CURRENT USER's Lightroom auto-load
-; folder — %APPDATA%\Adobe\Lightroom\Modules — so Lightroom Classic picks it up
+; folder -- %APPDATA%\Adobe\Lightroom\Modules -- so Lightroom Classic picks it up
 ; on next launch with ZERO Plug-in Manager steps. Per-user install: no UAC
-; prompt, no admin rights. Writes a normal HKCU uninstall entry (Settings ▸
+; prompt, no admin rights. Writes a normal HKCU uninstall entry (Settings >
 ; Apps) and an Uninstall.exe inside the plugin folder.
 ;
 ; Compiled CROSS-PLATFORM by makensis (Homebrew on macOS) from
 ; scripts/build-win-installer.sh, which supplies:
 ;   /DVERSION=<x.y.z[-suffix]>  /DVIVERSION=<x.y.z.0>
 ;   /DPAYLOAD=<staged SpeciesTagger.lrplugin dir>   (extracted from the -win zip
-;                                                    — single packaging truth)
+;                                                    -- single packaging truth)
 ;   /DOUTFILE=<output path>
 
-Unicode true
+; ASCII-only file + Unicode false: Homebrew makensis on macOS crashes
+; (std::bad_alloc, NSIS bug #1165) on ANY Unicode-target build and rejects
+; UTF-8 script input outright ("Bad text encoding"). All user-visible strings
+; are plain ASCII, so an ANSI installer loses nothing here. TODO: flip to
+; `Unicode true` when a fixed makensis ships (test: makensis a script without
+; `Unicode false` -- if it stops crashing, the bug is gone). Edge case while
+; ANSI: non-Latin Windows usernames outside the system codepage could break
+; the install path -- documented in docs/INSTALLERS-PLAN.md.
+Unicode false
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
 
@@ -32,16 +40,16 @@ VIAddVersionKey "ProductName" "Species Tagger for Lightroom Classic"
 VIAddVersionKey "FileDescription" "Species Tagger installer"
 VIAddVersionKey "FileVersion" "${VERSION}"
 VIAddVersionKey "ProductVersion" "${VERSION}"
-VIAddVersionKey "LegalCopyright" "© Yuval Oren"
+VIAddVersionKey "LegalCopyright" "(c) Yuval Oren"
 
 ; ---- pages -------------------------------------------------------------------
 !define MUI_WELCOMEPAGE_TITLE "Species Tagger for Lightroom Classic"
-!define MUI_WELCOMEPAGE_TEXT "This installs the Species Tagger plug-in for the current user. No administrator rights are needed, and there is nothing to configure — Lightroom Classic finds the plug-in automatically the next time it starts.$\r$\n$\r$\nYou need Adobe Lightroom Classic and Google Chrome installed to use it.$\r$\n$\r$\nIf you previously installed Species Tagger by hand through the Plug-in Manager, remove that old entry afterwards (File > Plug-in Manager > Remove) so it isn't listed twice."
+!define MUI_WELCOMEPAGE_TEXT "This installs the Species Tagger plug-in for the current user. No administrator rights are needed, and there is nothing to configure -- Lightroom Classic finds the plug-in automatically the next time it starts.$\r$\n$\r$\nYou need Adobe Lightroom Classic and Google Chrome installed to use it.$\r$\n$\r$\nIf you previously installed Species Tagger by hand through the Plug-in Manager, remove that old entry afterwards (File > Plug-in Manager > Remove) so it isn't listed twice."
 !insertmacro MUI_PAGE_WELCOME
 !insertmacro MUI_PAGE_INSTFILES
 
 !define MUI_FINISHPAGE_TITLE "Species Tagger is installed"
-!define MUI_FINISHPAGE_TEXT "Where to find it:$\r$\n$\r$\nSelect photos in the Library, then choose$\r$\nLibrary  >  Plug-in Extras  >  Identify and Tag Species$\r$\n$\r$\nA Chrome window opens with Google Lens results — highlight the species name and press Tag.$\r$\n$\r$\nIf Lightroom Classic was open during this install, restart it so it picks the plug-in up."
+!define MUI_FINISHPAGE_TEXT "Where to find it:$\r$\n$\r$\nSelect photos in the Library, then choose$\r$\nLibrary  >  Plug-in Extras  >  Identify and Tag Species$\r$\n$\r$\nA Chrome window opens with Google Lens results -- highlight the species name and press Tag.$\r$\n$\r$\nIf Lightroom Classic was open during this install, restart it so it picks the plug-in up."
 !define MUI_FINISHPAGE_SHOWREADME "${WIKI_URL}"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Open the quick-start guide"
 !insertmacro MUI_PAGE_FINISH
