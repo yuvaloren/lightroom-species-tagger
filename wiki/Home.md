@@ -23,7 +23,7 @@ Chrome** installed. (Prefer a manual install? See [[Installing]].)
 > File ▸ Plug-in Extras ▸ Identify and Tag Species**
 > (there's also a quick start under **Help ▸ Plug-in Extras**)
 
-![The Library ▸ Plug-in Extras menu in Lightroom Classic](images/plugin-extras-menu.png)
+![The File ▸ Plug-in Extras menu in Lightroom Classic](images/plugin-extras-menu.png)
 
 ## Quick start
 
