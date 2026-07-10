@@ -4,20 +4,17 @@
 
 Tag the **plants and animals** in your photos with both the **common name** and the
 **Latin (scientific) name** — straight from the Library module in **Adobe Lightroom
-Classic**.
+Classic**. This plugin uses Google Lens searches, as based on personal experience that 
+service seems to be more accurate than the Google Vision API.
 
-For each selected photo it opens **Google Lens** in a visible Chrome window — no paid
-API, no key. **You** read Google's real results and **highlight** the species name;
-press **Tag**, and the plugin resolves your pick through the
-[GBIF](https://www.gbif.org/) taxonomic backbone and writes canonical, consistent
-keywords — `Octopus cyanea` + `Day octopus`, not whatever a random page called it.
-Optionally it writes the full taxonomic hierarchy (Kingdom → … → Species) as nested
-keywords too.
+For each selected photo it opens **Google Lens** in a visible Chrome window. **You** read Google's results and **highlight** the species name;
+press **Tag** at the bottom bar, and the plugin resolves your pick through the
+[GBIF](https://www.gbif.org/) taxonomy service and writes canonical keywords to the
+image.
 
 > **Assistive by design.** The plugin doesn't read Google's results for you — you do,
-> and it uses only the name you highlight. That keeps it firmly within Google's terms
-> (no scraping, no automated extraction) and puts you in control of the identification;
-> the name you pick is then canonicalized through a real GBIF taxonomy resolver.
+> and it uses only the name you highlight, in order to allow follow-up refinement and
+> comply with Google's terms of service.
 
 - [What it does](#what-it-does)
 - [Install (from a release)](#install-from-a-release)
@@ -44,8 +41,7 @@ keywords too.
 
 ## Install (from a release)
 
-You only need **Google Chrome** installed (that's what shows the Lens results you
-tag from). Then:
+You must have **Google Chrome** and **Adobe Lightroom Classic** installed. Then:
 
 1. Download the zip for your OS from
    [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases):
@@ -86,10 +82,7 @@ with a small **Species Tagger** bar across the bottom. Then:
    resolves your selection through GBIF and writes the common + Latin keywords to that
    photo.
 
-If Google shows an "are you human" check, solve it yourself in the window, then
-highlight and Tag as usual. Nothing on the page is read by the plugin except the text
-you highlight — so if you pick the wrong thing, just highlight the right name and Tag
-again. Press **Skip** to leave a photo untagged.
+Press **Skip** to leave a photo untagged.
 
 ## Settings
 
@@ -219,8 +212,6 @@ Google's results:
   **you** highlight the species name, and it uses only that selection.
 - **You initiate the search.** The plugin loads Lens and you add keywords / press
   Search; there's no hidden or high-volume querying.
-- **Human in the loop for any check.** If Google shows an "are you human" check, you
-  solve it yourself in the window — the plugin never automates or bypasses a CAPTCHA.
 - **No account, no key, no third-party host, no bulk access.** An anonymous session on
   your own machine; the image goes only to Google Lens, and only the name you
   highlighted becomes keywords (resolved through the open **GBIF** API).
