@@ -68,19 +68,13 @@ changelog:
 # full local gate before pushing: lint + test + build
 check: lint test build
 
-# Remove EVERYTHING generated — the output/ tree (bundle + pulled deps) + coverage artifacts.
-#
-# The contract is the atomic `mv`: output/ stops existing in ONE syscall, so nothing can
-# ever see a half-deleted tree. DISPOSAL of the renamed copy is a separate concern that
-# can genuinely fail: Finder windows FOLLOW renames, so a window left open on output/dist
-# keeps recreating .DS_Store inside the trash dir between rm's sweep and its final rmdir
-# ("Directory not empty"). No amount of deleting beats a live same-user daemon, so
-# disposal is best-effort — and every clean STARTS by sweeping leftovers from earlier
-# runs (their windows are long closed). Net: `clean` never fails, `output/` is always
-# atomically gone, and a trash dir never survives past the next clean.
+# Remove EVERYTHING generated — the output/ tree (bundle + pulled deps) + coverage
+# artifacts. Plain rm by decision (Yuval, 2026-07-10): earlier mv-to-trash indirection
+# was judged overengineered. Rare known blemish: a Finder window open inside output/
+# can recreate .DS_Store mid-delete and fail one run ("Directory not empty") — rerun.
+# (.output-trash-* sweeps leftovers from the retired mv-based recipe; gitignored.)
 clean:
-    @rm -rf .output-trash-* 2>/dev/null || echo "note: an old .output-trash-* is still held open (Finder window?) — the next clean sweeps it"
-    @if [ -e output ]; then mv output ".output-trash-$$" && { rm -rf ".output-trash-$$" 2>/dev/null || echo "note: output/ is gone; Finder holds the trash copy (close its window) — the next clean sweeps it"; }; fi
+    rm -rf output .output-trash-*
     rm -f luacov.stats.out luacov.report.out
 
 # a full reset: also drop the pinned Lua toolchain + the Lens helper's node_modules
