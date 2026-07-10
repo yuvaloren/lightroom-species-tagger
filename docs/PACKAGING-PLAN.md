@@ -4,13 +4,15 @@
 [INSTALLERS-PLAN.md](INSTALLERS-PLAN.md). All of this ships as **v0.2.0** (dev label
 `0.2.0-dev` while in progress).*
 
-> **Status 2026-07-10: APPROVED and IMPLEMENTED** (steps 1–8 of the order below; local
-> dry-run verified — 3 zips, correct per-zip runtimes, both notarizations Accepted,
-> sizes mac 71 MB / win 32 MB / all 98 MB). Remaining before tagging v0.2.0: the
-> Windows-VM Extract-All + install test and the Mac browser-download Gatekeeper test.
-> One observation: puppeteer-core 25 no longer ships bare-* native prebuilds, so the
-> bundled Node is currently the only Mach-O — the prebuild pruning stays as
-> belt-and-braces.*
+> **Status: SHIPPED as v0.2.1** (v0.2.0 was published and withdrawn the same day — its
+> zips carried a stale EOL Node 20 because the build's Node cache was keyed by platform
+> only and survived the pin bump; fixed in e9de8cb with a version-keyed cache plus
+> version-string assertions at build time and in CI's smoke check). All verification
+> passed: per-zip runtime checks, both notarizations Accepted, Windows Extract-All +
+> install on the VM, and the browser-download Gatekeeper test (`gatekeeper-ok v24.18.0`,
+> universal binary, quarantined). Observation: puppeteer-core 25 no longer ships bare-*
+> native prebuilds, so the bundled Node is currently the only Mach-O — the prebuild
+> pruning stays as belt-and-braces.*
 
 ## The five issues
 
