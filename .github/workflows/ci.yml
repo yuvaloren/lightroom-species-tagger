@@ -7,8 +7,10 @@ on:
   pull_request:
   workflow_dispatch:
 
-# Least privilege by default: nothing needs write except the release job, which
-# opts back in explicitly. Third-party actions inherit only read.
+# CI is validation-only: it never signs and never publishes. Releases are cut
+# locally by ./release.sh (sign + notarize + package + gh release create) so the
+# signing identity and notary credentials never live in GitHub secrets — see
+# docs/SIGNING.md. Nothing here needs write access.
 permissions:
   contents: read
 
@@ -53,7 +55,7 @@ jobs:
       # (end users unzip and run — no npm needed). puppeteer-core is pure JS.
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: scripts/lens/package-lock.json
       - name: Install the Lens helper deps (bundled into the release)
@@ -79,8 +81,9 @@ jobs:
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
       - name: Smoke-check the built bundle
-        # Cheap guard that the composed .lrplugin is well-formed before it can be
-        # attached to a release: the entry files exist, the stamped Lua parses, the
+        # Cheap guard that the composed .lrplugin is well-formed and the three
+        # per-platform zips (scripts/package-zips.sh) each ship exactly their own
+        # OS's Node runtime: the entry files exist, the stamped Lua parses, the
         # Lens helper + its deps are bundled, and every zip is intact.
         run: |
           set -euo pipefail
@@ -91,7 +94,21 @@ jobs:
           test -d "$B/lens/node_modules/puppeteer-core" || { echo "::error::Lens helper deps not bundled"; exit 1; }
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Info.lua"))'
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Version.lua"))'
-          for z in output/dist/*.zip; do unzip -t "$z" >/dev/null && echo "ok: $z"; done
+          for v in mac win all; do
+            set -- output/dist/SpeciesTagger-*-"$v".zip
+            test -f "$1" || { echo "::error::missing the -$v zip"; exit 1; }
+            unzip -t "$1" >/dev/null || { echo "::error::corrupt zip: $1"; exit 1; }
+          done
+          set -- output/dist/SpeciesTagger-*-mac.zip; MAC="$1"
+          set -- output/dist/SpeciesTagger-*-win.zip; WIN="$1"
+          set -- output/dist/SpeciesTagger-*-all.zip; ALL="$1"
+          unzip -l "$MAC" | grep -q 'node/darwin-' || { echo "::error::mac zip ships no darwin Node"; exit 1; }
+          if unzip -l "$MAC" | grep -q 'node\.exe'; then echo "::error::mac zip contains node.exe"; exit 1; fi
+          unzip -l "$WIN" | grep -q 'node\.exe' || { echo "::error::win zip ships no node.exe"; exit 1; }
+          if unzip -l "$WIN" | grep -q 'node/darwin-'; then echo "::error::win zip contains a darwin Node"; exit 1; fi
+          unzip -l "$ALL" | grep -q 'node/darwin-' || { echo "::error::all zip is missing the darwin Node"; exit 1; }
+          unzip -l "$ALL" | grep -q 'node\.exe' || { echo "::error::all zip is missing node.exe"; exit 1; }
+          echo "zips ok: $(basename "$MAC") $(basename "$WIN") $(basename "$ALL")"
 
       - name: Upload artifacts
         uses: actions/upload-artifact@v7
@@ -108,7 +125,7 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-node@v6
         with:
-          node-version: "20"
+          node-version: "24"
           cache: npm
           cache-dependency-path: scripts/lens/package-lock.json
       - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
@@ -119,97 +136,3 @@ jobs:
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
         run: cd scripts/lens && npm test
-
-  # ── macOS: universal-Node + Developer ID sign + notarize (v* tags only) ───────
-  # Turns the composed bundle into the signed, notarized release zip that actually
-  # runs on a downloader's Mac — an unsigned, quarantined Node binary is Gatekeeper-
-  # blocked on first launch. Composes on the runner (so it has the arm64 slice to
-  # lipo against), then hands off to scripts/sign-macos.sh. Inert until the signing
-  # secrets exist (see docs/SIGNING.md): with none set the sign step fails, so a tag
-  # never ships an unsigned zip; regular push/PR CI is unaffected (tag-gated).
-  notarize-macos:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, lens-helper]
-    runs-on: macos-14
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0
-
-      - uses: leafo/gh-actions-lua@v13
-        with:
-          luaVersion: "5.1.5"
-      - uses: leafo/gh-actions-luarocks@v6
-      - name: Install the Lua build dependency
-        run: luarocks install luafilesystem
-
-      - uses: actions/setup-node@v6
-        with:
-          node-version: "20"
-          cache: npm
-          cache-dependency-path: scripts/lens/package-lock.json
-      - name: Bundle the Lens helper deps
-        run: cd scripts/lens && npm ci
-
-      - name: Compose the release bundle (darwin arm64 + win-x64)
-        run: lua build/build.lua --no-zip
-        env:
-          GITHUB_REF_NAME: ${{ github.ref_name }}
-          GITHUB_RUN_NUMBER: ${{ github.run_number }}
-          ST_NODE_PLATFORMS: darwin-arm64,win-x64
-
-      - name: Universal Node + sign + notarize + package
-        run: bash scripts/sign-macos.sh
-        env:
-          MACOS_SIGN_IDENTITY: ${{ secrets.MACOS_SIGN_IDENTITY }}
-          MACOS_CERT_P12_BASE64: ${{ secrets.MACOS_CERT_P12_BASE64 }}
-          MACOS_CERT_PASSWORD: ${{ secrets.MACOS_CERT_PASSWORD }}
-          MACOS_KEYCHAIN_PASSWORD: ${{ secrets.MACOS_KEYCHAIN_PASSWORD }}
-          NOTARY_KEY_ID: ${{ secrets.NOTARY_KEY_ID }}
-          NOTARY_ISSUER_ID: ${{ secrets.NOTARY_ISSUER_ID }}
-          NOTARY_KEY_P8_BASE64: ${{ secrets.NOTARY_KEY_P8_BASE64 }}
-
-      - name: Upload the signed bundle
-        uses: actions/upload-artifact@v7
-        with:
-          name: lrplugin-signed
-          path: |
-            output/dist/*.zip
-            output/dist/checksums.txt
-
-  # ── Release (v* tags only): publish ONLY if build, lens-helper, and notarize are green ──
-  # Separate, least-privilege job so a tag can never publish a GitHub Release while a
-  # gate is red. Publishes the macOS-signed bundle (the one that runs on a downloader's Mac).
-  release:
-    if: startsWith(github.ref, 'refs/tags/v')
-    needs: [build, lens-helper, notarize-macos]
-    runs-on: ubuntu-latest
-    permissions:
-      contents: write # create the GitHub Release and upload assets
-    steps:
-      - uses: actions/checkout@v7
-        with:
-          fetch-depth: 0 # git-cliff needs full history + tags
-
-      - name: Download the signed bundle
-        uses: actions/download-artifact@v8
-        with:
-          name: lrplugin-signed
-          path: output/dist
-
-      - name: Generate release notes
-        id: cliff
-        continue-on-error: true
-        uses: orhun/git-cliff-action@f50e11560dce63f7c33227798f90b924471a88b5 # v4
-        with:
-          config: cliff.toml
-          args: --latest --strip all
-
-      - name: Release
-        uses: softprops/action-gh-release@718ea10b132b3b2eba29c1007bb80653f286566b # v3.0.1
-        with:
-          body: ${{ steps.cliff.outputs.content }}
-          generate_release_notes: true
-          files: |
-            output/dist/*.zip
-            output/dist/checksums.txt

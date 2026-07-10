@@ -44,7 +44,10 @@ local DKJSON_VERSION = '2.10'
 -- copied into the bundle at <plugin>/node/<os-arch>/node[.exe] so the plugin needs no
 -- system Node — the user supplies only Google Chrome. Each key maps to Node's own
 -- archive kind and the path of the `node` binary inside that archive.
-local NODE_VERSION = 'v20.20.2'
+-- Keep this the newest ACTIVE LTS (check https://endoflife.date/nodejs before bumping):
+-- CI's weekly guard (scripts/check-node-eol.sh) goes red when the pin nears EOL or
+-- drifts from scripts/lens/.nvmrc — never ship an end-of-life runtime to users.
+local NODE_VERSION = 'v24.18.0'
 local NODE_PLATFORMS = {
 	[ 'win-x64' ]      = { archive = 'zip',    bin = 'node.exe' },
 	[ 'win-arm64' ]    = { archive = 'zip',    bin = 'node.exe' },
@@ -452,28 +455,11 @@ local function compose( label )
 end
 
 local function package_zips( label )
-	if not have_tool( 'zip' ) then
-		die( 'zip is required to package artifacts (install it, or pass --no-zip)' )
-	end
-	local names = {}
-	for _, plugin in ipairs( PLUGINS ) do
-		local zipname = plugin .. '.lrplugin-' .. label .. '.zip'
-		run( string.format( 'cd %q && zip -qr %q %q', DIST, zipname, plugin .. '.lrplugin' ) )
-		names[ #names + 1 ] = zipname
-		log( 'zipped ' .. zipname )
-	end
-
-	local sha = have_tool( 'shasum' ) and 'shasum -a 256'
-		or ( have_tool( 'sha256sum' ) and 'sha256sum' or nil )
-	if sha then
-		local list = {}
-		for _, n in ipairs( names ) do list[ #list + 1 ] = string.format( '%q', n ) end
-		run( string.format( 'cd %q && %s %s > checksums.txt',
-			DIST, sha, table.concat( list, ' ' ) ) )
-		log( 'wrote checksums.txt' )
-	else
-		log( 'note: no shasum/sha256sum found — skipped checksums.txt' )
-	end
+	-- ALL zip packaging (the three per-platform zips — SpeciesTagger-<ver>-mac/-win/
+	-- -all.zip — plus checksums.txt) lives in ONE place, scripts/package-zips.sh,
+	-- shared with the signed-release path (scripts/sign-macos.sh) so the dev/CI zips
+	-- and the release zips can never drift.
+	run( string.format( 'bash %q %q', ROOT .. '/scripts/package-zips.sh', label ) )
 end
 
 --------------------------------------------------------------------------------

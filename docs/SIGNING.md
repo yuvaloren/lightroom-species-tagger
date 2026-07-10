@@ -9,10 +9,12 @@ browser download does — so the bug only shows up for real end users. See
 
 [`scripts/sign-macos.sh`](../scripts/sign-macos.sh) fixes it at the source: it makes the
 bundled Node a **universal** binary (Intel + Apple Silicon in one), **codesigns** it with a
-Developer ID Application identity + hardened runtime, **notarizes** the packaged zip, and
-repackages `output/dist/SpeciesTagger.lrplugin-<version>.zip` + `checksums.txt`. Nothing in
-the plugin's Lua changes — `resolveNode` still loads `node/darwin-arm64/node`, which is now
-universal.
+Developer ID Application identity + hardened runtime, packages the three per-platform zips
+via [`scripts/package-zips.sh`](../scripts/package-zips.sh)
+(`SpeciesTagger-<version>-mac/-win/-all.zip` + `checksums.txt`), and **notarizes** the
+mac-containing ones (`-mac`, `-all`; the `-win` zip's `node.exe` is already
+Authenticode-signed). Nothing in the plugin's Lua changes — `resolveNode` still loads
+`node/darwin-arm64/node`, which is now universal.
 
 ## One-time prerequisites (Apple Developer)
 
@@ -26,16 +28,19 @@ universal.
 
 ## Running it locally
 
-**One command** takes a clean checkout to a signed, notarized, distributable zip:
+**One command** takes a clean checkout to a signed, notarized, **published** release:
 
 ```bash
-./release.sh                   # full signed + notarized release -> output/dist/
+./release.sh                   # sign + notarize + package + publish the GitHub Release
+./release.sh --no-publish      # everything except the GitHub Release (dry run)
 ./release.sh --allow-unsigned  # before your Developer ID exists (universal Node only)
 ```
 
 `release.sh` bootstraps the pinned Lua toolchain and the Lens helper deps if they're missing,
-composes the bundle (darwin universal + win-x64), then makes the Node runtime universal,
-code-signs it, notarizes, and packages — the whole pipeline in one process.
+composes the bundle (darwin universal + win-x64), makes the Node runtime universal,
+code-signs it, packages the three zips, notarizes, and publishes them with
+`gh release create` — the whole pipeline in one process. Publishing requires the release
+tag at HEAD (see the `cut-release` skill).
 
 Set signing up once: store a notary profile, and put your identity + profile in a gitignored
 `scripts/signing.env` that `release.sh` sources (so nothing goes on the command line):
@@ -57,25 +62,16 @@ runs on both architectures now. The zip it produces is **not** for distribution.
 Under the hood `release.sh` just chains the repo's existing pieces (`dev-setup.sh` → `npm ci`
 → `build.sh` → `scripts/sign-macos.sh`); run those individually only for inner-loop debugging.
 
-## Running it in CI
+## Why signing does NOT run in CI
 
-The `notarize-macos` job in [`.github/workflows/ci.yml`](../.github/workflows/ci.yml) runs on
-`v*` tags: it composes the bundle on a `macos-14` runner, runs `sign-macos.sh`, and uploads
-the signed zip, which the `release` job then publishes. It stays **inert until these GitHub
-repository secrets exist**:
-
-| Secret | What it is |
-|---|---|
-| `MACOS_SIGN_IDENTITY` | `Developer ID Application: Your Name (TEAMID)` |
-| `MACOS_CERT_P12_BASE64` | Your Developer ID cert + private key exported as `.p12`, base64-encoded (`base64 -i cert.p12 \| pbcopy`) |
-| `MACOS_CERT_PASSWORD` | The password you set when exporting the `.p12` |
-| `MACOS_KEYCHAIN_PASSWORD` | Any random string — password for the throwaway CI keychain |
-| `NOTARY_KEY_ID` | App Store Connect API **Key ID** |
-| `NOTARY_ISSUER_ID` | App Store Connect API **Issuer ID** |
-| `NOTARY_KEY_P8_BASE64` | The API key `.p8`, base64-encoded |
-
-Until they're added, a tag build simply fails at the signing step (it never ships an unsigned
-zip) — regular push/PR CI is unaffected because the job is tag-gated.
+**Decision (2026-07-09): the signing identity and notary credentials never leave this Mac.**
+Putting the Developer ID private key (as a `.p12`) and the notary API key into GitHub
+secrets would make GitHub a custodian of code-signing identity; a leak there would let
+anyone sign software as "Yuval Oren". So CI is **validation-only** — lint, tests, an
+unsigned bundle build with per-zip content checks, and the weekly Node-EOL guard — and the
+signed release is produced and published locally by `./release.sh`. The env-var hooks that
+`sign-macos.sh` reads (`MACOS_CERT_P12_BASE64`, `NOTARY_KEY_P8_BASE64`, …) still exist for
+any future runner **you** control, but no GitHub-hosted workflow uses them.
 
 ## Verifying a signed build
 

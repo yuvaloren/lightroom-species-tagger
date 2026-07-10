@@ -3,6 +3,12 @@
 *Lightroom Classic plugin. Planning doc — updated 2026-07-09. Pivoted to **sign + notarize
 the bundled binary**; native installers and Adobe Exchange are now optional later layers.*
 
+> **Update 2026-07-10 — partially superseded by [PACKAGING-PLAN.md](PACKAGING-PLAN.md):**
+> releases now ship **three per-platform zips** (`SpeciesTagger-<ver>-mac/-win/-all.zip`;
+> the `-all` zip is the future Adobe Exchange package), and the "add the 7 signing secrets
+> to CI" path below was **retired** — decision: no signing secrets on GitHub. CI is
+> validation-only; `./release.sh` signs, notarizes, packages, and publishes locally.
+
 ## Goal
 
 Make the released plugin **just work when a real user downloads it**, on both Mac

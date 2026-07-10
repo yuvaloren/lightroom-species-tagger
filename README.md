@@ -47,15 +47,24 @@ keywords too.
 You only need **Google Chrome** installed (that's what shows the Lens results you
 tag from). Then:
 
-1. Download the latest `SpeciesTagger.lrplugin-*.zip` from
-   [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases) and unzip.
-   The bundle is **self-contained** — it ships its own Node runtime *and* the Lens
+1. Download the zip for your OS from
+   [Releases](https://github.com/yuvaloren/lightroom-species-tagger/releases):
+   `SpeciesTagger-<version>-mac.zip` (macOS — one universal build for Apple Silicon
+   *and* Intel) or `SpeciesTagger-<version>-win.zip` (Windows).
+   (`SpeciesTagger-<version>-all.zip` carries both OSes in one — it's the package
+   single-download channels like Adobe Exchange use; you don't need it.)
+   Every zip is **self-contained** — it ships its own Node runtime *and* the Lens
    helper's dependencies, so there's no Node to install and nothing to `npm install`.
-2. Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select the
+2. Unzip it:
+   - **macOS:** double-click the zip — you get the `SpeciesTagger.lrplugin` folder.
+   - **Windows:** right-click ▸ **Extract All** — Windows wraps the result in a
+     `SpeciesTagger-<version>-win` folder; the plugin is the `SpeciesTagger.lrplugin`
+     folder **inside** it.
+3. Lightroom Classic → **File ▸ Plug-in Manager ▸ Add** → select that
    `SpeciesTagger.lrplugin` folder.
-3. The first time you run it, a short **welcome** lists every setting and where to
+4. The first time you run it, a short **welcome** lists every setting and where to
    find it. Open **Plug-in Manager ▸ Species Tagger** any time to adjust them.
-4. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
+5. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
    Tag Species**.
 
 > Google gates the Lens endpoint on the **network you run from** — use a normal home

@@ -11,9 +11,12 @@
 #      (resolveNode still finds node/darwin-arm64/node, which is now universal).
 #   2. codesign every Mach-O in the bundle (the Node binary + the Lens helper's native
 #      addons, e.g. bare-* *.bare files) with a Developer ID identity + hardened runtime.
-#   3. notarize the packaged zip with notarytool (Gatekeeper then clears it on first run;
-#      a bare binary/folder can't be stapled, but the plugin is online anyway).
-#   4. repackage output/dist/SpeciesTagger.lrplugin-<version>.zip + checksums.txt.
+#   3. package the three per-platform zips via scripts/package-zips.sh
+#      (SpeciesTagger-<version>-mac/-win/-all.zip + checksums.txt).
+#   4. notarize the mac-containing zips (-mac and -all) with notarytool (Gatekeeper
+#      then clears them on first run; a bare binary/folder can't be stapled, but the
+#      plugin is online anyway). The -win zip needs none — its node.exe is already
+#      Authenticode-signed by the OpenJS Foundation.
 #
 # Run it AFTER composing the bundle:
 #   ST_NODE_PLATFORMS=darwin-arm64,win-x64 lua build/build.lua --no-zip
@@ -60,7 +63,8 @@ resolve_version() {
 	echo "dev"
 }
 VERSION="$(resolve_version)"
-ZIP="SpeciesTagger.lrplugin-$VERSION.zip"
+ZIP_MAC="SpeciesTagger-$VERSION-mac.zip"
+ZIP_ALL="SpeciesTagger-$VERSION-all.zip"
 
 # ---- pinned Node version (single source of truth = build/build.lua) ---------
 NODE_VERSION="$(grep -oE "NODE_VERSION = 'v[0-9][0-9.]*'" build/build.lua | grep -oE 'v[0-9][0-9.]*' | head -1)"
@@ -158,14 +162,19 @@ PLIST
 		|| die "Node lacks the allow-jit entitlement — it would crash under the hardened runtime"
 fi
 
-# ---- 3. package the distributable zip + checksums ---------------------------
-say "packaging $DIST/$ZIP"
-( cd "$DIST" && rm -f ./*.zip checksums.txt && zip -qr "$ZIP" "SpeciesTagger.lrplugin" )
-( cd "$DIST" && shasum -a 256 "$ZIP" > checksums.txt )
+# ---- 3. package the three distributable zips + checksums ---------------------
+# Shared with build.lua's zip step — scripts/package-zips.sh is the single source
+# of packaging truth (per-platform pruning happens on COPIES; the signed bundle
+# itself is untouched, and every Mach-O carries its own signature).
+say "packaging the release zips (scripts/package-zips.sh)"
+bash scripts/package-zips.sh "$VERSION"
+[ -f "$DIST/$ZIP_MAC" ] || die "packaging produced no $ZIP_MAC — compose with ST_NODE_PLATFORMS including darwin-arm64"
+[ -f "$DIST/$ZIP_ALL" ] || die "packaging produced no $ZIP_ALL"
 
-# ---- 4. notarize the packaged zip -------------------------------------------
+# ---- 4. notarize the mac-containing zips -------------------------------------
+# The -win zip ships no Mach-O (its node.exe is already Authenticode-signed), so
+# only -mac and -all are submitted.
 if [ "$DO_SIGN" = "1" ]; then
-	say "submitting to the Apple notary service (this can take a few minutes)…"
 	notary_args=()
 	if [ -n "${NOTARY_KEY_P8_BASE64:-}" ]; then
 		printf '%s' "$NOTARY_KEY_P8_BASE64" | base64 --decode > "$TMP/AuthKey.p8"
@@ -177,22 +186,29 @@ if [ "$DO_SIGN" = "1" ]; then
 	else
 		die "no notary credentials — set NOTARY_KEY_P8_BASE64 + NOTARY_KEY_ID + NOTARY_ISSUER_ID, or NOTARY_PROFILE (see docs/SIGNING.md)"
 	fi
-	xcrun notarytool submit "$DIST/$ZIP" "${notary_args[@]}" --wait 2>&1 | tee "$TMP/notary.out" || true
-	# notarytool can exit 0 even when the result is Invalid, so gate on the reported
-	# status, not the exit code. (A zip of a folder can't be stapled; Gatekeeper does an
-	# online check on first run instead — fine, the plugin is online anyway.)
-	nstatus="$( grep -E '^[[:space:]]*status:' "$TMP/notary.out" | tail -1 | awk '{print $NF}' )"
-	if [ "$nstatus" != "Accepted" ]; then
-		nid="$( grep -Eo 'id: [0-9a-fA-F-]{36}' "$TMP/notary.out" | head -1 | awk '{print $2}' )"
-		[ -n "$nid" ] && { say "notarization $nstatus — Apple's issues:"; xcrun notarytool log "$nid" "${notary_args[@]}" 2>&1 | head -60; }
-		die "notarization did not pass (status: ${nstatus:-unknown}); fix the issues above and re-run"
-	fi
-	say "notarization Accepted."
+	notarize_zip() {
+		local zip="$1"
+		say "submitting $zip to the Apple notary service (this can take a few minutes)…"
+		xcrun notarytool submit "$DIST/$zip" "${notary_args[@]}" --wait 2>&1 | tee "$TMP/notary.out" || true
+		# notarytool can exit 0 even when the result is Invalid, so gate on the reported
+		# status, not the exit code. (A zip of a folder can't be stapled; Gatekeeper does an
+		# online check on first run instead — fine, the plugin is online anyway.)
+		local nstatus nid
+		nstatus="$( grep -E '^[[:space:]]*status:' "$TMP/notary.out" | tail -1 | awk '{print $NF}' )"
+		if [ "$nstatus" != "Accepted" ]; then
+			nid="$( grep -Eo 'id: [0-9a-fA-F-]{36}' "$TMP/notary.out" | head -1 | awk '{print $2}' )"
+			[ -n "$nid" ] && { say "notarization $nstatus — Apple's issues:"; xcrun notarytool log "$nid" "${notary_args[@]}" 2>&1 | head -60; }
+			die "notarization of $zip did not pass (status: ${nstatus:-unknown}); fix the issues above and re-run"
+		fi
+		say "notarization Accepted: $zip"
+	}
+	notarize_zip "$ZIP_MAC"
+	notarize_zip "$ZIP_ALL"
 fi
 
 if [ "$DO_SIGN" = "1" ]; then
-	say "done — signed + notarized: $DIST/$ZIP"
+	say "done — signed + notarized: $DIST/$ZIP_MAC, $DIST/$ZIP_ALL (+ win zip, Authenticode-signed node.exe)"
 else
-	say "done — UNSIGNED (universal binary only, testing use): $DIST/$ZIP"
+	say "done — UNSIGNED (universal binary only, testing use): $DIST/SpeciesTagger-$VERSION-{mac,win,all}.zip"
 	say "re-run with a Developer ID identity + notary credentials for a distributable build."
 fi
