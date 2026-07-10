@@ -65,9 +65,11 @@ You must have **Google Chrome** and **Adobe Lightroom Classic** installed.
 > may show *"Windows protected your PC"* — click **More info ▸ Run anyway**. (The
 > macOS installer is signed and notarized; Windows code signing is in progress.)
 
-To uninstall: **Windows** — Settings ▸ Apps ▸ Species Tagger (or run
-`Uninstall.exe` in the plugin folder); **macOS** — delete
-`~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`.
+To uninstall: **Windows** — Settings ▸ Apps ▸ Species Tagger; **macOS** —
+**Help ▸ Plug-in Extras ▸ Species Tagger quick start… ▸ Uninstall…** (or delete
+`~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`).
+If the plug-in ever shows as **disabled** after an install (only happens when an
+older copy existed on the machine), enable it once in File ▸ Plug-in Manager.
 
 ### The manual way — zip + Plug-in Manager
 

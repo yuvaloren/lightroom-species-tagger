@@ -1,5 +1,20 @@
 # Troubleshooting
 
+### The plug-in shows as disabled after installing
+If a copy of Species Tagger was ever installed on this machine before (for example a
+manual unzip added through Plug-in Manager), Lightroom remembers its disabled/enabled
+state and can apply it to the newly installed copy. Open **File ▸ Plug-in Manager**,
+select **Species Tagger**, and click **Enable**. One-time fix; fresh machines are not
+affected.
+
+### How do I uninstall?
+- **Windows:** Settings ▸ Apps ▸ **Species Tagger for Lightroom Classic** ▸ Uninstall.
+- **macOS:** **Help ▸ Plug-in Extras ▸ Species Tagger quick start… ▸ Uninstall…** — or
+  delete `~/Library/Application Support/Adobe/Lightroom/Modules/SpeciesTagger.lrplugin`
+  and restart Lightroom.
+- **Manual (zip) installs:** File ▸ Plug-in Manager ▸ select Species Tagger ▸ **Remove**,
+  then delete the unzipped folder.
+
 ### “Could not load toolkit script” after updating the plugin
 Lightroom's **Reload Plug-in** doesn't always register a newly-*added* script file. After
 re-installing an update that added a module, **remove the plug-in in Plug-in Manager and
