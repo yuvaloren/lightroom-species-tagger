@@ -92,6 +92,12 @@ jobs:
             test -f "$B/$f" || { echo "::error::missing $B/$f"; exit 1; }
           done
           test -d "$B/lens/node_modules/puppeteer-core" || { echo "::error::Lens helper deps not bundled"; exit 1; }
+          # every bundled Node binary must embed the pinned version string — catches
+          # a stale cache or wrong archive (v0.2.0 shipped Node 20 this way)
+          NV="$(grep -oE "NODE_VERSION = 'v[0-9][0-9.]*'" build/build.lua | grep -oE 'v[0-9][0-9.]*' | head -1)"
+          for bin in "$B"/node/*/node*; do
+            grep -aq "$NV" "$bin" || { echo "::error::$bin does not embed $NV — stale Node runtime"; exit 1; }
+          done
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Info.lua"))'
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Version.lua"))'
           for v in mac win all; do

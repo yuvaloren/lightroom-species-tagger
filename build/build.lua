@@ -208,16 +208,30 @@ local function node_platforms()
 	return { 'win-arm64', 'darwin-arm64' }
 end
 
--- Ensure the Node runtime for one platform key is cached under output/deps/node/<key>/,
--- fetching + extracting from nodejs.org if absent (cheap once cached, like dkjson).
--- Returns the cached binary path and its filename (node / node.exe).
+-- Ensure the Node runtime for one platform key is cached under
+-- output/deps/node/<NODE_VERSION>/<key>/, fetching + extracting from nodejs.org if
+-- absent (cheap once cached, like dkjson). Returns the cached binary path and its
+-- filename (node / node.exe).
+--
+-- The cache path MUST include the version: v0.2.0 shipped an EOL Node 20 in the
+-- -mac/-win zips because the old cache was keyed by platform alone, so bumping
+-- NODE_VERSION silently reused the stale binaries. verify_node_version() is the
+-- belt-and-braces for the same failure: every binary that leaves this function must
+-- embed the pinned version string (process.version is ASCII in both Mach-O and PE).
+local function verify_node_version( path )
+	run( string.format( 'grep -aq %q %q', NODE_VERSION, path ) )
+end
+
 local function ensure_one_node( key )
 	local spec = NODE_PLATFORMS[ key ]
 	if not spec then die( 'unknown node platform: ' .. key ) end
 	local binName = ( spec.bin:match( '([^/]+)$' ) )
-	local destDir = DEPS .. '/node/' .. key
+	local destDir = DEPS .. '/node/' .. NODE_VERSION .. '/' .. key
 	local cached = destDir .. '/' .. binName
-	if exists( cached ) then return cached, binName end
+	if exists( cached ) then
+		verify_node_version( cached )
+		return cached, binName
+	end
 	if not have_tool( 'curl' ) then die( 'curl is required to fetch the bundled Node runtime' ) end
 	mkdirp( destDir )
 	local base = 'node-' .. NODE_VERSION .. '-' .. key
@@ -239,6 +253,7 @@ local function ensure_one_node( key )
 	copy_file( extracted, cached )
 	if binName == 'node' then run( string.format( 'chmod +x %q', cached ) ) end
 	rmtree( tmp )
+	verify_node_version( cached )
 	log( 'cached Node -> ' .. cached )
 	return cached, binName
 end

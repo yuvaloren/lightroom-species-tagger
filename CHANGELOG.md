@@ -4,6 +4,16 @@ All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and the project follows
 [Semantic Versioning](https://semver.org/).
 
+## [0.2.1]
+
+Fixes v0.2.0's release artifacts shipping a stale, end-of-life **Node 20** runtime: the
+build's Node cache was keyed by platform only, so the v20 → v24 pin bump silently reused
+old cached binaries (the mac zip even mixed a Node 20 arm64 slice with a Node 24 Intel
+slice). The cache is now keyed by version, the pinned version string is asserted in every
+fetched binary at build time, and CI's smoke check asserts it in every bundled binary.
+The v0.2.0 release has been withdrawn — use this one; its zips genuinely ship Node
+v24.18.0.
+
 ## [0.2.0]
 
 Packaging and release-pipeline overhaul. Releases now ship **three zips** —
