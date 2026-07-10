@@ -80,8 +80,7 @@ end
 local function firstRunWelcome()
 	LrDialogs.message( 'Species Tagger — Welcome', table.concat( {
 		'WHERE TO FIND IT:  select photos in the Library, then ' ..
-			'Library ▸ Plug-in Extras ▸ Identify and Tag Species ' ..
-			'(also under File ▸ Plug-in Extras in every module).',
+			'File ▸ Plug-in Extras ▸ Identify and Tag Species.',
 		'',
 		'Species Tagger helps you tag the plants and animals in your photos with both the ' ..
 			'common and the Latin (scientific) name.',

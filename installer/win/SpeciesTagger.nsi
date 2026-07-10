@@ -49,7 +49,7 @@ VIAddVersionKey "LegalCopyright" "(c) Yuval Oren"
 !insertmacro MUI_PAGE_INSTFILES
 
 !define MUI_FINISHPAGE_TITLE "Species Tagger is installed"
-!define MUI_FINISHPAGE_TEXT "Where to find it:$\r$\n$\r$\nSelect photos in the Library, then choose$\r$\nLibrary  >  Plug-in Extras  >  Identify and Tag Species$\r$\n(also under File > Plug-in Extras, from any module)$\r$\n$\r$\nA Chrome window opens with Google Lens results -- highlight the species name and press Tag.$\r$\n$\r$\nIf Lightroom Classic was open during this install, restart it so it picks the plug-in up."
+!define MUI_FINISHPAGE_TEXT "Where to find it:$\r$\n$\r$\nSelect photos in the Library, then choose$\r$\nFile  >  Plug-in Extras  >  Identify and Tag Species$\r$\n$\r$\nA Chrome window opens with Google Lens results -- highlight the species name and press Tag.$\r$\n$\r$\nIf Lightroom Classic was open during this install, restart it so it picks the plug-in up."
 !define MUI_FINISHPAGE_SHOWREADME "${WIKI_URL}"
 !define MUI_FINISHPAGE_SHOWREADME_TEXT "Open the quick-start guide"
 !insertmacro MUI_PAGE_FINISH

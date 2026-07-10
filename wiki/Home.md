@@ -20,16 +20,15 @@ Chrome** installed. (Prefer a manual install? See [[Installing]].)
 ## Where to find it in Lightroom
 
 > **Select photos in the Library, then choose
-> Library ▸ Plug-in Extras ▸ Identify and Tag Species**
-> (also under **File ▸ Plug-in Extras** in every module, and there's a quick
-> start under **Help ▸ Plug-in Extras**)
+> File ▸ Plug-in Extras ▸ Identify and Tag Species**
+> (there's also a quick start under **Help ▸ Plug-in Extras**)
 
 ![The Library ▸ Plug-in Extras menu in Lightroom Classic](images/plugin-extras-menu.png)
 
 ## Quick start
 
 1. **Install** with the download above, then start (or restart) Lightroom Classic.
-2. **Select photos** in the Library and run **Library ▸ Plug-in Extras ▸ Identify and
+2. **Select photos** in the Library and run **File ▸ Plug-in Extras ▸ Identify and
    Tag Species**. A Chrome window opens with Google's results for the first photo.
 3. **Highlight the species name** in the results (Latin or common — either works) and
    press **Tag** in the bar at the bottom. The keywords are written to the photo, and

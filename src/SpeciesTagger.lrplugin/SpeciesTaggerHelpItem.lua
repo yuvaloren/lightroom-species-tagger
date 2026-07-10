@@ -16,8 +16,7 @@ LrTasks.startAsyncTask( function()
 		'Species Tagger — quick start',
 		table.concat( {
 			'1.  Select photos in the Library.',
-			'2.  Run  Library ▸ Plug-in Extras ▸ Identify and Tag Species',
-			'     (also under  File ▸ Plug-in Extras  in any module).',
+			'2.  Run  File ▸ Plug-in Extras ▸ Identify and Tag Species.',
 			'3.  A Chrome window opens with Google Lens results — HIGHLIGHT the',
 			'     species name (Latin or common) and press “Tag”. “Skip” leaves a',
 			'     photo untouched.',

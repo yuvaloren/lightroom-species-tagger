@@ -19,7 +19,7 @@ image.
 **Download the installer:**
 [**macOS** (.pkg — Apple Silicon & Intel)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-mac.pkg) ·
 [**Windows** (.exe)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-win-setup.exe) —
-run it, restart Lightroom, then **Library ▸ Plug-in Extras ▸ Identify and Tag Species**.
+run it, restart Lightroom, then **File ▸ Plug-in Extras ▸ Identify and Tag Species**.
 Full guide on the [wiki](https://github.com/yuvaloren/lightroom-species-tagger/wiki).
 
 - [What it does](#what-it-does)
@@ -58,8 +58,8 @@ You must have **Google Chrome** and **Adobe Lightroom Classic** installed.
    No admin rights needed; the plugin lands in Lightroom's auto-load `Modules`
    folder for the current user, so there are **no Plug-in Manager steps**.
 2. Start (or restart) Lightroom Classic.
-3. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
-   Tag Species** (also under **File ▸ Plug-in Extras** in any module).
+3. Select photos in the Library, then **File ▸ Plug-in Extras ▸ Identify and
+   Tag Species**.
 
 > **Windows note (temporary):** the installer isn't code-signed yet, so SmartScreen
 > may show *"Windows protected your PC"* — click **More info ▸ Run anyway**. (The
@@ -98,9 +98,8 @@ To uninstall: **Windows** — Settings ▸ Apps ▸ Species Tagger (or run
 
 ## Using it
 
-Select one or more photos and run **Library ▸ Plug-in Extras ▸ Identify and Tag
-Species** (the command also lives under **File ▸ Plug-in Extras**, visible from
-any module, and **Help ▸ Plug-in Extras** has a quick-start summary). For each
+Select one or more photos and run **File ▸ Plug-in Extras ▸ Identify and Tag
+Species** (**Help ▸ Plug-in Extras** has a quick-start summary). For each
 photo a Chrome window opens showing Google's real results page,
 with a small **Species Tagger** bar across the bottom. Then:
 
