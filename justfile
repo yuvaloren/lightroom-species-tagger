@@ -82,6 +82,11 @@ clean:
 clean-all: clean
     rm -rf .lua-env scripts/lens/node_modules
 
+# Adobe Exchange submission package (SpeciesTagger.zip = released -all zip + .mxi).
+# Defaults to the latest release tag; see docs/DISTRIBUTION.md.
+exchange-zip *ARGS:
+    bash scripts/build-exchange-zip.sh {{ARGS}}
+
 # ONE command: clean checkout -> signed, notarized, distributable zip in output/dist/.
 # Universal Node + Developer ID sign + notarize + package. Pass --allow-unsigned before the
 # Developer ID exists; signing config via env or a gitignored scripts/signing.env (docs/SIGNING.md).
