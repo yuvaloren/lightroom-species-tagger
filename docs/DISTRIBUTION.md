@@ -17,16 +17,29 @@ post](https://blog.developer.adobe.com/lightroom-classic-plugin-support-for-the-
 ### The package
 
 ```
-just exchange-zip            # or: bash scripts/build-exchange-zip.sh [X.Y.Z]
+just exchange                # or: bash scripts/build-exchange.sh [X.Y.Z]
 ```
 
-produces `output/dist/SpeciesTagger.zip`:
+produces `output/dist/SpeciesTagger.zxp` — a ZXP (signed zip) containing:
 
 ```
-SpeciesTagger.zip
-├─ SpeciesTagger.lrplugin/   # payload of the released -all zip, verbatim
+SpeciesTagger.zxp
+├─ SpeciesTagger.lrplugin/   # payload of the released -all zip (.DS_Store stripped)
 └─ SpeciesTagger.mxi         # install manifest: .lrplugin → $modules
 ```
+
+Signing: `ZXPSignCmd` 4.1.2 (auto-fetched from Adobe's
+[CEP-Resources](https://github.com/Adobe-CEP/CEP-Resources/tree/master/ZXPSignCMD)
+and cached under `output/deps/`), with a **self-signed** cert — Adobe's
+documented path for Exchange; the portal re-encrypts uploads and ties them to
+the publisher's Adobe ID. The cert + generated password persist (gitignored)
+at `scripts/exchange-cert.{p12,pass}` so the identity is stable across
+versions; override via `ZXP_CERT_P12` / `ZXP_CERT_PASSWORD` in
+`scripts/signing.env`. Signatures are RFC-3161 timestamped (`time.certum.pl`,
+Comodo fallback — TSAs go down regularly; DigiCert's is known-flaky with
+ZXPSignCmd). Per Adobe's
+[KnownIssue2024](https://github.com/Adobe-CEP/CEP-Resources/blob/master/ZXPSignCMD/KnownIssue2024.md):
+no `.DS_Store`/`__MACOSX`, no symlinks in the package.
 
 - Payload comes FROM the released `SpeciesTagger-<ver>-all.zip` (downloaded
   from the GitHub release when not in `output/dist`) — single source of
@@ -38,8 +51,9 @@ SpeciesTagger.zip
 - Adobe's naming rule: mxi basename == package basename == mxi `id`
   (`SpeciesTagger`). The package name is unversioned; the version lives in the
   mxi.
-- Exchange also accepts signed ZXPs. We submit the plain zip; if review asks
-  for a ZXP, add a `ZXPSignCmd` step to `scripts/build-exchange-zip.sh`.
+- No public `.mxi` targeting LightroomClassic exists anywhere on GitHub
+  (checked 2026-07-11) — this repo is the first open example; the Adobe blog
+  post + its gists are the only other reference.
 
 ### Submitting (one-time setup, then per-release)
 
@@ -50,8 +64,8 @@ SpeciesTagger.zip
    details (Digital Services Act) — a free listing can opt out of EU
    distribution instead.
 2. Create a Creative Cloud **listing**: metadata + media (icon, screenshots),
-   upload `SpeciesTagger.zip` as the version package, submit for review.
-3. Per release afterwards: `just exchange-zip`, upload as a new version with
+   upload `SpeciesTagger.zxp` as the version package, submit for review.
+3. Per release afterwards: `just exchange`, upload as a new version with
    release notes (from CHANGELOG.md), resubmit.
 
 Adobe contacts: `ccintrev@adobe.com` for build/upload/review issues,

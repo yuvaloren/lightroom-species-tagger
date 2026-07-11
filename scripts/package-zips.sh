@@ -59,6 +59,8 @@ make_zip() { # $1 = variant: mac | win | all
 	local tree="$work/SpeciesTagger.lrplugin"
 	mkdir -p "$work"
 	cp -R "$BUNDLE" "$tree"
+	# Finder droppings must never ship (Adobe Exchange flags .DS_Store in packages).
+	find "$tree" -name '.DS_Store' -delete 2>/dev/null || true
 	prune_prebuilds "$tree" ios android linux
 	case "$variant" in
 		mac)

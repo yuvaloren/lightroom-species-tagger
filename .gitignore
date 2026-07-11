@@ -23,6 +23,11 @@
 # Never commit — it's per-machine and references your signing setup.
 /scripts/signing.env
 
+# LOCAL ZXP signing material for the Adobe Exchange package (scripts/build-exchange.sh):
+# self-signed cert + its generated password. Reused across versions; never commit.
+/scripts/exchange-cert.p12
+/scripts/exchange-cert.pass
+
 # Test coverage artifacts.
 luacov.stats.out
 luacov.report.out
