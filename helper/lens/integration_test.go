@@ -219,6 +219,28 @@ func portAnswers(port int) bool {
 	return true
 }
 
+// newCacheDir hands each test an isolated LENS_CACHE_DIR and tears it down
+// SAFELY: close the window, wait for the port to go dark, give Chrome a beat
+// to finish flushing the profile, then best-effort remove. t.TempDir()'s
+// fatal-on-error cleanup races Chrome's async shutdown writes (seen flaking
+// on both darwin and linux); a leftover tmp dir is harmless, a red test run
+// from a straggling profile write is not.
+func newCacheDir(t *testing.T, port int) string {
+	dir, err := os.MkdirTemp("", "lens-it-cache")
+	if err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() {
+		closeWindow(t, port, dir)
+		for i := 0; i < 20 && portAnswers(port); i++ {
+			time.Sleep(250 * time.Millisecond)
+		}
+		time.Sleep(500 * time.Millisecond)
+		_ = os.RemoveAll(dir)
+	})
+	return dir
+}
+
 func tmpImage(t *testing.T, content string) string {
 	t.Helper()
 	p := filepath.Join(t.TempDir(), "lens-it.jpg")
@@ -233,10 +255,9 @@ func tmpImage(t *testing.T, content string) string {
 func TestScenarios(t *testing.T) {
 	f := startFakeGoogle(t)
 	const port = 9477
-	cache := t.TempDir()
+	cache := newCacheDir(t, port) // closes the window + tidies up, race-free
 	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
 	base := f.srv.URL
-	t.Cleanup(func() { closeWindow(t, port, cache) }) // never leave a test window behind
 
 	sel := func(page, selid, expect string) {
 		t.Helper()
@@ -314,10 +335,9 @@ func TestScenarios(t *testing.T) {
 func TestUploadPath(t *testing.T) {
 	f := startFakeGoogle(t)
 	const port = 9478
-	cache := t.TempDir()
+	cache := newCacheDir(t, port)
 	imgBytes := "definitely-the-photo-bytes-" + strings.Repeat("x", 4096)
 	img := tmpImage(t, imgBytes)
-	t.Cleanup(func() { closeWindow(t, port, cache) })
 
 	r := runHelper(t, port, cache, map[string]string{
 		"LENS_TEST_UPLOAD_URL":     f.srv.URL + "/v3/upload",
@@ -357,9 +377,8 @@ func TestUploadPath(t *testing.T) {
 func TestDetachedLifecycle(t *testing.T) {
 	f := startFakeGoogle(t)
 	const port = 9479
-	cache := t.TempDir()
+	cache := newCacheDir(t, port)
 	img := tmpImage(t, "x")
-	t.Cleanup(func() { closeWindow(t, port, cache) })
 
 	// Helper #1 launches Chrome, times out quickly, and exits...
 	r := runHelper(t, port, cache, map[string]string{
@@ -414,7 +433,7 @@ func TestDetachedLifecycle(t *testing.T) {
 func TestTrustedClickPreservesSelection(t *testing.T) {
 	const port = 9480
 	const name = "Conolophus pallidus"
-	cache := t.TempDir()
+	cache := newCacheDir(t, port)
 	profile := filepath.Join(cache, "chrome-profile-assist")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
