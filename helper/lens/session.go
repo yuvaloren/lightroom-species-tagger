@@ -32,6 +32,21 @@ import (
 //go:embed overlay_inject.js
 var overlayJS string
 
+// headlessTestFlags launch Chrome headless for the test suites ONLY. Beyond
+// --headless=new + --no-sandbox, the GPU/shm flags keep the RENDERER from
+// crashing on CI hardware that has no GPU/display: the macos-latest runner
+// returned Inspector.detached "Render process gone." the instant a page
+// attached, on GPU/Metal init, which made Page.enable hang until timeout (a
+// real Mac with a GPU passes without them). Production never uses this path —
+// the user's window is headed with a real GPU — so this can't affect real use.
+var headlessTestFlags = []string{
+	"--headless=new",
+	"--no-sandbox",
+	"--disable-gpu",
+	"--disable-software-rasterizer",
+	"--disable-dev-shm-usage",
+}
+
 // Config is the env contract, unchanged from the Node helper (plus
 // LENS_TEST_UPLOAD_URL, which exists so the integration tests can exercise
 // the REAL upload path against a local endpoint — the one flow LENS_TEST_URL
@@ -193,7 +208,7 @@ func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
 		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
 	}
 	if cfg.TestHeadless {
-		args = append(args, "--headless=new", "--no-sandbox")
+		args = append(args, headlessTestFlags...)
 	} else {
 		args = append(args, "--window-size=1280,960")
 	}

@@ -442,12 +442,13 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	if err := chrome.SpawnDetached(chrome.Find(), []string{
+	launch := append([]string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--user-data-dir=" + profile,
 		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
-		"--headless=new", "--no-sandbox", "about:blank",
-	}); err != nil {
+	}, headlessTestFlags...) // same CI-stable GPU/shm flags as the real launch
+	launch = append(launch, "about:blank")
+	if err := chrome.SpawnDetached(chrome.Find(), launch); err != nil {
 		t.Fatal(err)
 	}
 	ctx := context.Background()

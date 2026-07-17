@@ -195,7 +195,4 @@ jobs:
         working-directory: helper
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
-          # TEMP: raw CDP frame trace to root-cause the macos-latest Page.enable
-          # hang (reverted once diagnosed). Run only scenario A so the log is short.
-          LENS_CDP_TRACE: "1"
-        run: go test -tags integration -count=1 -v -run 'TestScenarios/A_' ./lens/
+        run: go test -tags integration -race -count=1 -v ./lens/
