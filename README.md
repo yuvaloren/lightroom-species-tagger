@@ -43,6 +43,11 @@ Full guide on the [wiki](https://github.com/yuvaloren/lightroom-species-tagger/w
   the results before you pick (see [Using it](#using-it)).
 - **One window, m-of-n.** Multi-photo runs reuse a single Chrome window with a "Photo 2
   of 5" counter; **Skip** leaves a photo untouched.
+- **Bursts are one photo.** Near-identical frames shot within a second of each other
+  (configurable) are grouped automatically — the counter shows "Burst 2 of 5 — 12
+  photos", and one Tag (or Skip) covers the whole burst. Detection is fully local:
+  capture times from the catalog plus a perceptual fingerprint of the rendered
+  previews; a different subject seconds later never groups.
 - **Cross-platform:** macOS and Windows.
 
 ## Install (from a release)
@@ -116,6 +121,11 @@ with a small **Species Tagger** bar across the bottom. Then:
 
 Press **Skip** to leave a photo untagged.
 
+Bursts are grouped automatically: the bar shows **"Burst m of n — k photos"** and your
+Tag or Skip applies to every frame in the group (one Undo in Lightroom restores the
+whole group). Turn grouping off, or widen the allowed gap between frames, in the
+settings.
+
 ## Settings
 
 Open **Plug-in Manager ▸ Species Tagger**.
@@ -124,6 +134,8 @@ Open **Plug-in Manager ▸ Species Tagger**.
 |---|---|
 | Keywords | `flat` (common + Latin), `hierarchy` (Kingdom→Species), or `both` |
 | Include applied keywords on export | Whether the keywords travel with exported files |
+| Group burst photos automatically | One identification tags a whole burst of near-identical frames (on by default) |
+| Max seconds between frames | Frames further apart than this never group (default 1) |
 
 ## How it works
 
@@ -149,6 +161,13 @@ Open **Plug-in Manager ▸ Species Tagger**.
    is the gate, so a common name that looks binomial still resolves correctly.
 4. **Keywording** (`Keywords.lua`) writes the result: flat `common` + `Latin`
    keywords, the full hierarchy, or both.
+
+Multi-photo runs add a step 0 — **burst detection**: every selected photo is rendered
+once, the bundled helper fingerprints the renders locally (a two-plane perceptual
+fingerprint — gradient structure + absolute luma levels; no Chrome, no network), and `Burst.lua` groups consecutive frames whose capture times
+AND fingerprints both match. Each group then goes through steps 1–4 as one photo,
+with Tag/Skip acting on all of its frames. The similarity threshold is tuned against
+a labelled corpus of real bursts (`just burst-accuracy`), gated on zero false merges.
 
 The whole resolve → keyword pipeline is pure and unit-tested, independent of the browser
 helper that feeds it. Contributor setup and the command surface are in
@@ -228,6 +247,9 @@ and data flow are detailed in [SECURITY.md](SECURITY.md).
   resolves to species/genus. It's a fast assist, not a taxonomist.
 - The Lens step is **best-effort** (a consumer Google surface, in your own browser).
   Run from a residential network; solve any check yourself.
+- Burst grouping prefers splitting to merging: a frame that changed framing a lot (or
+  whose preview render failed) falls out of the group and just costs one extra Lens
+  read. A group never spans a capture-time gap larger than the one you set.
 
 ## Scope & responsible use
 
