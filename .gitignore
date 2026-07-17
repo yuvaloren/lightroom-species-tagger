@@ -42,6 +42,11 @@ luacov.report.out
 test/**/*.jpg
 test/**/*.jpeg
 test/**/*.png
+# Exception: the burst-detection accuracy corpus is a DELIBERATE, committed
+# fixture (build/burst-accuracy.lua gates CI on it). These are 256 px frames
+# with ALL metadata markers stripped — no EXIF, no GPS, no camera serial (see
+# the strip step in that commit) — so the guard's intent still holds.
+!test/plugin/fixtures/burst-corpus/*.jpg
 
 # macOS
 .DS_Store
