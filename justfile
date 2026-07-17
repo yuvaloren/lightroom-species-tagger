@@ -114,8 +114,17 @@ clean-all: clean
 exchange *ARGS:
     bash build/build-exchange.sh {{ARGS}}
 
-# ONE command: clean checkout -> signed, notarized, distributable zip in output/dist/.
-# Developer ID sign + notarize + package. Pass --allow-unsigned before the Developer
-# ID exists; signing config via env or a gitignored build/signing.env.
+# Build the installable packages WITHOUT releasing: the signed + notarized
+# macOS .pkg, the Windows .exe, the three zips, and checksums, into
+# output/dist/. No version bump, no tag, no publish — and no on-main / clean /
+# synced gate, so it runs from any branch. Use it to test the real install
+# flow. Pass --allow-unsigned before the Developer ID exists.
+package *ARGS:
+    bash build/release.sh --no-publish {{ARGS}}
+
+# THE release (irreversible once it pushes the tag): pre-flight VERIFIES you are
+# on main, clean, and synced with origin, then cuts + Developer ID signs +
+# notarizes + publishes vX.Y.Z and syncs the wiki. `just package` is the
+# build-only dry run. Signing config via env or a gitignored build/signing.env.
 release *ARGS:
     bash build/release.sh {{ARGS}}

@@ -185,7 +185,8 @@ just build clean   # same, wiping output/ first
 just test          # Lua specs (busted) + Go helper unit tests
 just install       # build if needed, then install a copy into Lightroom (Add/Reload)
 just check         # the full gate: lint + tests + build (run before pushing)
-just release       # the one-command signed + notarized release
+just package       # build the signed + notarized installers (.pkg/.exe/zips), no release
+just release       # the real release (verifies on main + clean + synced, then publishes)
 ```
 
 `just build` bootstraps the toolchain if it's missing and cross-compiles the Go

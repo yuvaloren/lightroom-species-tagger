@@ -30,9 +30,12 @@ just setup
 | `just lens-live` | Opt-in smoke against the REAL Google (headed Chrome, ~30s). Run before releases; never in CI. |
 | `just lint` | luacheck + gofmt + go vet + shellcheck + staticcheck. |
 | `just check` | The full local gate: lint + tests + build. Run this before pushing. |
+| `just package` | Build the signed + notarized installers (`.pkg`/`.exe`), zips, and checksums into `output/dist/` — no release. Runs from any branch. |
 
-Releases are cut by the maintainer only, via `just release` — contributors
-never run it.
+Releases are cut by the maintainer only, via `just release` (which verifies
+you're on `main`, clean, and synced with origin before it publishes) —
+contributors never run it. `just package` is the build-only equivalent for
+testing the install flow.
 
 ## Layout
 

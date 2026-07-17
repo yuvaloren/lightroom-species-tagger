@@ -2,11 +2,16 @@
 # release.sh — THE release: one command, no AI in the loop, from a -dev tree to
 # a published GitHub Release + synced wiki, with development reopened after.
 #
+# Prefer the `just` recipes: `just release` for the real thing, `just package`
+# for the build-only dry run (= this script with --no-publish).
+#
 #   ./release.sh                    # full release (stages below)
 #   ./release.sh --version 0.4.0    # override the target (minor/major jumps)
 #   ./release.sh --yes              # skip the single confirmation prompt
-#   ./release.sh --no-publish       # build-only dry run of the CURRENT tree:
-#                                   # no bump, no tag, no publish, no wiki
+#   ./release.sh --no-publish       # build-only dry run of the CURRENT tree
+#                                   # (`just package`): builds the installers,
+#                                   # skips the on-main/clean/synced gate, no
+#                                   # bump, no tag, no publish, no wiki
 #   ./release.sh --allow-unsigned   # (dry runs only) build before signing exists
 #
 # Full-release stages — everything IRREVERSIBLE happens only after the whole
@@ -69,18 +74,21 @@ if [ -f build/signing.env ]; then
 fi
 
 # ---- release-mode gates BEFORE any expensive work ----------------------------
+# These run ONLY for a real release (`just release`). `just package`
+# (--no-publish) skips them entirely, so a test build works from any branch.
 if [ "$NO_PUBLISH" = "0" ]; then
+	# 1. pre-flight: on main, clean, synced with origin — verified up front so a
+	#    release that can't be published fails before any expensive work.
+	say "pre-flight: verifying on main, clean, and synced with origin"
+	BRANCH="$(git rev-parse --abbrev-ref HEAD)"
+	[ "$BRANCH" = "main" ] || die "releases are cut from main (you are on $BRANCH) — use 'just package' for a build-only dry run"
+	[ -z "$(git status --porcelain)" ] || die "working tree is not clean — commit or stash first"
 	command -v gh >/dev/null 2>&1 || die "gh (GitHub CLI) is required to publish"
 	gh auth status >/dev/null 2>&1 || die "gh is not logged in (gh auth login)"
-
-	# 1. pre-flight: clean tree, on main, synced with origin
-	[ -z "$(git status --porcelain)" ] || die "working tree is not clean — commit or stash first"
-	BRANCH="$(git rev-parse --abbrev-ref HEAD)"
-	[ "$BRANCH" = "main" ] || die "releases are cut from main (you are on $BRANCH)"
-	say "pre-flight: fetching origin"
 	git fetch -q origin main
 	[ "$(git rev-parse HEAD)" = "$(git rev-parse origin/main)" ] \
 		|| die "main is not in sync with origin/main — push or pull first"
+	say "pre-flight OK: on main, clean, synced"
 
 	# 2. resolve the target version
 	RAW="$(tr -d '[:space:]' < VERSION)"
