@@ -47,13 +47,17 @@ ZIP_MAC="$DIST/SpeciesTagger-$VERSION-mac.zip"
 ALLOW_UNSIGNED="${ALLOW_UNSIGNED:-0}"
 
 # ---- signing identity ---------------------------------------------------------
+# ALLOW_UNSIGNED=1 means an explicitly UNSIGNED build: never sign, never
+# notarize — even if a Developer ID Installer identity happens to be in the
+# keychain. (Auto-detecting it here would sign the pkg and then require notary
+# credentials, defeating the whole point of --allow-unsigned.)
 IDENTITY="${MACOS_INSTALLER_SIGN_IDENTITY:-}"
-if [ -z "$IDENTITY" ]; then
+if [ "$ALLOW_UNSIGNED" = "1" ]; then
+	IDENTITY=""
+elif [ -z "$IDENTITY" ]; then
 	IDENTITY="$(security find-identity -v -p basic 2>/dev/null \
 		| grep -Eo '"Developer ID Installer: [^"]*"' | head -1 | tr -d '"')" || true
-fi
-if [ -z "$IDENTITY" ] && [ "$ALLOW_UNSIGNED" != "1" ]; then
-	die "no Developer ID Installer identity found — set MACOS_INSTALLER_SIGN_IDENTITY or pass ALLOW_UNSIGNED=1 (never distributable)"
+	[ -n "$IDENTITY" ] || die "no Developer ID Installer identity found — set MACOS_INSTALLER_SIGN_IDENTITY or pass ALLOW_UNSIGNED=1 (never distributable)"
 fi
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
