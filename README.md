@@ -79,8 +79,9 @@ older copy existed on the machine), enable it once in File ▸ Plug-in Manager.
    *and* Intel) or `SpeciesTagger-<version>-win.zip` (Windows).
    (`SpeciesTagger-<version>-all.zip` carries both OSes in one — it's the package
    single-download channels like Adobe Exchange use; you don't need it.)
-   Every zip is **self-contained** — it ships its own Node runtime *and* the Lens
-   helper's dependencies, so there's no Node to install and nothing to `npm install`.
+   Every zip is **self-contained** — recognition is driven by a small native
+   helper (~6 MB) bundled inside; there is no runtime to install and nothing to
+   configure. You supply only Google Chrome.
 2. Unzip it:
    - **macOS:** double-click the zip — you get the `SpeciesTagger.lrplugin` folder.
    - **Windows:** right-click ▸ **Extract All** — Windows wraps the result in a
@@ -134,7 +135,8 @@ Open **Plug-in Manager ▸ Species Tagger**.
         keywords ◀── plan (flat + hierarchy) ◀── canonical taxon ◀── GBIF resolve
 ```
 
-1. **Google Lens** (`src/shared/Http.lua` + the Node helper `scripts/lens`): the
+1. **Google Lens** (`src/shared/Http.lua` + the bundled lens helper, a small
+   native binary built from `helper/`): the
    helper uploads the downsized image and opens Google Lens in your installed Chrome —
    a **visible** window showing Google's real results, with a small bottom bar (a Tag
    button, a Skip button, and an "m of n" counter). The plugin does not read the page.
@@ -181,15 +183,15 @@ whole gate, and it's exactly what CI runs.
 
 ## Repository layout — authored vs. generated
 
-*(Answering the reasonable question "is all that code in `node_modules` / `.deps`
-ours?" — no. Here's every tree and who wrote it.)*
+*(Answering the reasonable question "how much of this is third-party?" —
+almost none. Here's every tree and who wrote it.)*
 
 **Authored (this is the project):**
 
 ```
 src/shared/                 pure, testable modules (name resolver, taxonomy, keywords, http)
 src/SpeciesTagger.lrplugin/ the Lightroom glue (menus, settings, catalog writes)
-scripts/lens/               the Google Lens browser helper (lens-search.js, overlay-inject.js, tests)
+helper/                     the Go lens helper (CDP client, Chrome control, overlay, tests)
 spec/                       unit specs (busted) + GBIF fixtures for offline tests
 build/build.lua             composes/stamps/zips the bundle
 docs/, *.sh, justfile       docs + entry-point scripts
@@ -205,17 +207,18 @@ by **`just clean`**:
 | `output/dist/` | The built `.lrplugin` bundle + zips | generated | `./build.sh` |
 | `output/deps/` | The one Lua runtime dep (`dkjson`) | third-party | pulled by LuaRocks at build |
 
-Two dependency trees can't live under `output/` (their tools require a fixed
-location) — `just clean-all` removes them too:
+Two trees can't live under `output/` (their tools require a fixed location) —
+`just clean-all` removes them too:
 
 | Tree | What it is | Ours? | Why it's separate |
 |---|---|---|---|
-| `scripts/lens/node_modules/` | `puppeteer-core` (pure JS) | third-party | Node resolves modules next to `package.json` |
+| `helper/dist/` | Cross-compiled helper binaries | generated | `make -C helper universal` |
 | `.lua-env/` | Pinned Lua 5.1 + LuaRocks toolchain | third-party | your installed dev env, not build output |
 
 The only third-party **runtime** code that ships inside the `.lrplugin` is `dkjson`
-(JSON) and `puppeteer-core` (drives your Chrome). Taxonomy uses GBIF over `LrHttp`;
-there's no SDK to vendor.
+(JSON); the lens helper is our own Go binary with a single small dependency
+(`coder/websocket`) compiled in. Taxonomy uses GBIF over `LrHttp`; there's no SDK
+to vendor.
 
 ## Privacy
 

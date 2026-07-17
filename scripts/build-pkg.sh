@@ -67,6 +67,21 @@ ditto -x -k "$ZIP_MAC" "$TMP/root"
 # ---- 2. component pkg ----------------------------------------------------------
 # Analyze, then force the component non-relocatable: Installer must always place
 # it at the Modules path, never "find" a copy elsewhere and update that instead.
+# Clean upgrade: a pkg OVERLAYS files and never removes paths absent from the
+# new payload -- a <=0.3.x install carries node/ (~200 MB) + lens/ (~29 MB)
+# that would otherwise survive every upgrade. The preinstall removes the
+# previous plugin dir wholesale; it holds no user data (the Chrome profile
+# lives in ~/.cache/speciestagger-lens, keywords live in the LR catalog).
+mkdir -p "$TMP/scripts"
+cat > "$TMP/scripts/preinstall" <<'SH'
+#!/bin/sh
+# $2 = install location (~/Library/Application Support/Adobe/Lightroom/Modules
+# under the currentUserHome domain). Never rm blind on an empty $2.
+[ -n "$2" ] && rm -rf "$2/SpeciesTagger.lrplugin"
+exit 0
+SH
+chmod +x "$TMP/scripts/preinstall"
+
 pkgbuild --analyze --root "$TMP/root" "$TMP/component.plist" >/dev/null
 /usr/bin/python3 - "$TMP/component.plist" <<'PY'
 import plistlib, sys
@@ -78,6 +93,7 @@ PY
 say "building component pkg (install-location: ~/Library/Application Support/Adobe/Lightroom/Modules)"
 pkgbuild --root "$TMP/root" \
 	--component-plist "$TMP/component.plist" \
+	--scripts "$TMP/scripts" \
 	--identifier "$PKG_ID" \
 	--version "$VERSION" \
 	--install-location "/Library/Application Support/Adobe/Lightroom/Modules" \
@@ -98,7 +114,7 @@ cat > "$TMP/distribution.xml" <<XML
 	<title>Species Tagger for Lightroom Classic</title>
 	<welcome file="welcome.html"/>
 	<conclusion file="conclusion.html"/>
-	<options customize="never" require-scripts="false" hostArchitectures="arm64,x86_64"/>
+	<options customize="never" require-scripts="true" hostArchitectures="arm64,x86_64"/>
 	<domains enable_anywhere="false" enable_currentUserHome="true" enable_localSystem="false"/>
 	<pkg-ref id="$PKG_ID" version="$VERSION">component.pkg</pkg-ref>
 	<choices-outline>

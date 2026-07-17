@@ -17,9 +17,10 @@
 #      wrote it during development, else generated from conventional commits
 #      (git-cliff --prepend)
 #   4. lint + tests (pinned .lua-env toolchain — same gate as CI)
-#   5. the full artifact pipeline: compose (darwin universal + win-x64),
-#      Developer ID sign + notarize, three zips, stapled pkg, Windows
-#      installer (Azure Trusted Signing once configured), checksums
+#   5. the full artifact pipeline: build the Go helper, compose (darwin
+#      universal + win-x64 + win-arm64), Developer ID sign + notarize, three
+#      zips, stapled pkg, Windows installer (Azure Trusted Signing once
+#      configured), checksums
 #   6. >>> the ONE y/N confirmation (version + changelog + assets) <<<
 #   7. commit VERSION+CHANGELOG, tag vX.Y.Z, push commit + tag
 #   8. CI gate: wait for green checks on the tagged commit. CI validates and
@@ -31,8 +32,8 @@
 #  10. verify: six assets on the Release; latest/download URLs resolve
 #  11. reopen development at X.Y.(Z+1)-dev, commit, push
 #
-# Genuine external prerequisites a script can't create: Node/npm, a C
-# toolchain (luarocks), `gh` logged in, the signing/notary setup
+# Genuine external prerequisites a script can't create: Go (brew install go),
+# a C toolchain (luarocks), `gh` logged in, the signing/notary setup
 # (docs/SIGNING.md), and dev rocks in .lua-env (bootstrapped on first run).
 set -euo pipefail
 cd "$(dirname "$0")"
@@ -128,17 +129,16 @@ if [ ! -x .lua-env/bin/lua ]; then
 	bash dev-setup.sh
 fi
 
-# 2. Lens helper deps (puppeteer-core) — ALWAYS npm ci: it's cheap (pure JS) and
-# guarantees the bundle ships exactly the lockfile, never a stale node_modules
-# left over from before a dependency bump.
-say "vendoring the Lens helper deps (cd scripts/lens && npm ci)"
-( cd scripts/lens && npm ci )
+# 2. The Go lens helper: cross-compile all four targets + the universal mac
+# binary from scratch — the exact bytes that ship (fast; pure Go, no cgo).
+say "building the lens helper (make -C helper universal)"
+make -C helper universal
 
-# 3. Compose the release bundle: darwin arm64 (universal source) + win-x64.
+# 3. Compose the release bundle: darwin-universal + win-x64 + win-arm64.
 say "composing the release bundle"
-ST_NODE_PLATFORMS=darwin-arm64,win-x64 bash build.sh --no-zip
+bash build.sh --no-zip
 
-# 4. Universal Node + Developer ID sign + notarize + package the three zips.
+# 4. Developer ID sign + notarize + package the three zips.
 say "signing + packaging"
 bash scripts/sign-macos.sh ${SIGN_ARGS[@]+"${SIGN_ARGS[@]}"}
 

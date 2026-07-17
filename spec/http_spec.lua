@@ -3,8 +3,9 @@ local Http = require 'Http'
 local T = Http._test
 
 -- Http.lua's SDK-bound parts (lrAdapter, runHelper, close) need LrHttp/LrTasks and
--- real subprocesses, so they're driven by the Node integration test, not here. These
--- specs cover the PURE seams factored out for exactly this reason.
+-- real subprocesses, so they're driven by the Go helper's integration suite
+-- (helper/lens/integration_test.go), not here. These specs cover the PURE seams
+-- factored out for exactly this reason.
 
 describe( 'Http._test.shQuote', function()
 	it( 'POSIX-quotes and escapes an embedded single quote', function()
@@ -20,33 +21,35 @@ describe( 'Http._test.shQuote', function()
 	end )
 end )
 
-describe( 'Http._test.resolveNode', function()
-	it( 'falls back to bare "node" when no candidate exists (Windows probe off-Windows)', function()
-		-- The Windows candidates (C:\Program Files\nodejs\node.exe) don't exist on the
-		-- test box, so the probe exhausts and returns the PATH-resolved bare name.
-		assert.equal( 'node', T.resolveNode( true ) )
+describe( 'Http._test.resolveHelper', function()
+	it( 'returns the preferred candidate even when nothing exists on disk', function()
+		-- No bundle on the test box: the probe exhausts and returns candidate #1
+		-- (win-x64) so runHelper's "reinstall" error can name the missing path.
+		assert.equal( 'C:\\P\\SpeciesTagger.lrplugin\\helper\\win-x64\\lens-helper.exe',
+			T.resolveHelper( true, 'C:\\P\\SpeciesTagger.lrplugin' ) )
 	end )
-	it( 'returns a string for the POSIX probe (a real path or the bare fallback)', function()
-		assert.equal( 'string', type( T.resolveNode( false ) ) )
+	it( 'is nil when no plugin path is available (headless / pure runs)', function()
+		assert.is_nil( T.resolveHelper( true, nil ) )
 	end )
 end )
 
-describe( 'Http._test.bundledNodeCandidates', function()
-	it( 'lists the Windows bundle paths (arm64 preferred) under <plugin>/node/', function()
+describe( 'Http._test.bundledHelperCandidates', function()
+	it( 'lists the Windows paths — x64 FIRST (x64 runs everywhere; arm64 only on ARM)', function()
 		assert.same( {
-			'C:\\P\\SpeciesTagger.lrplugin\\node\\win-arm64\\node.exe',
-			'C:\\P\\SpeciesTagger.lrplugin\\node\\win-x64\\node.exe',
-		}, T.bundledNodeCandidates( true, 'C:\\P\\SpeciesTagger.lrplugin' ) )
+			'C:\\P\\SpeciesTagger.lrplugin\\helper\\win-x64\\lens-helper.exe',
+			'C:\\P\\SpeciesTagger.lrplugin\\helper\\win-arm64\\lens-helper.exe',
+		}, T.bundledHelperCandidates( true, 'C:\\P\\SpeciesTagger.lrplugin' ) )
 	end )
-	it( 'lists the macOS bundle paths (arm64 preferred)', function()
+	it( 'lists the macOS bundle paths (universal preferred)', function()
 		assert.same( {
-			'/p/SpeciesTagger.lrplugin/node/darwin-arm64/node',
-			'/p/SpeciesTagger.lrplugin/node/darwin-x64/node',
-		}, T.bundledNodeCandidates( false, '/p/SpeciesTagger.lrplugin' ) )
+			'/p/SpeciesTagger.lrplugin/helper/darwin-universal/lens-helper',
+			'/p/SpeciesTagger.lrplugin/helper/darwin-arm64/lens-helper',
+			'/p/SpeciesTagger.lrplugin/helper/darwin-x64/lens-helper',
+		}, T.bundledHelperCandidates( false, '/p/SpeciesTagger.lrplugin' ) )
 	end )
 	it( 'is empty when no plugin path is given (headless / pure runs)', function()
-		assert.same( {}, T.bundledNodeCandidates( true, nil ) )
-		assert.same( {}, T.bundledNodeCandidates( false, '' ) )
+		assert.same( {}, T.bundledHelperCandidates( true, nil ) )
+		assert.same( {}, T.bundledHelperCandidates( false, '' ) )
 	end )
 end )
 

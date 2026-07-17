@@ -15,7 +15,7 @@ permissions:
   contents: read
 
 jobs:
-  # ── Lua: lint + unit/accuracy tests + build the distributable bundle ──────────
+  # ── Lua lint/tests + Go unit tests + the full bundle, smoke-checked ─────────
   build:
     runs-on: ubuntu-latest
     steps:
@@ -51,15 +51,24 @@ jobs:
           luacov
           tail -n 30 luacov.report.out || true
 
-      # Node deps for the Lens helper, so the built bundle is self-contained
-      # (end users unzip and run — no npm needed). puppeteer-core is pure JS.
-      - uses: actions/setup-node@v6
+      # ── the Go lens helper: gofmt + vet + unit tests + all four binaries ──
+      - uses: actions/setup-go@v6
         with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: scripts/lens/package-lock.json
-      - name: Install the Lens helper deps (bundled into the release)
-        run: cd scripts/lens && npm ci
+          go-version-file: helper/go.mod
+          cache-dependency-path: helper/go.sum
+
+      - name: Helper gofmt + vet + unit tests (race detector on)
+        working-directory: helper
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::gofmt"; exit 1; }
+          go vet ./...
+          go vet -tags integration ./...
+          go test -race ./...
+
+      - name: Cross-compile the helper (all targets + universal mac binary)
+        run: |
+          sudo apt-get -yq install llvm >/dev/null # llvm-lipo for the universal binary
+          make -C helper universal
 
       - name: Version drift guard (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -74,47 +83,61 @@ jobs:
           fi
           echo "version ok: $TAG"
 
-      - name: Build bundle (includes the Lens helper + its node_modules)
+      - name: Build bundle (includes the Go lens helper)
         run: lua build/build.lua
         env:
           GITHUB_REF_NAME: ${{ github.ref_name }}
           GITHUB_RUN_NUMBER: ${{ github.run_number }}
 
       - name: Smoke-check the built bundle
-        # Cheap guard that the composed .lrplugin is well-formed and the three
-        # per-platform zips (scripts/package-zips.sh) each ship exactly their own
-        # OS's Node runtime: the entry files exist, the stamped Lua parses, the
-        # Lens helper + its deps are bundled, and every zip is intact.
+        # Guards the composed .lrplugin and the three per-platform zips: the
+        # entry files exist and parse, the right helper binaries ship in the
+        # right variants, the Node era (node/, lens/, node_modules) is GONE,
+        # and no helper binary blows the size budget (a binary over 8 MB means
+        # a chromedp/cdproto-class dependency crept in — the whole point of the
+        # hand-rolled CDP client is staying small).
         run: |
           set -euo pipefail
           B=output/dist/SpeciesTagger.lrplugin
-          for f in Info.lua Version.lua TagSpecies.lua Config.lua dkjson.lua lens/lens-search.js; do
+          for f in Info.lua Version.lua TagSpecies.lua Config.lua dkjson.lua; do
             test -f "$B/$f" || { echo "::error::missing $B/$f"; exit 1; }
-          done
-          test -d "$B/lens/node_modules/puppeteer-core" || { echo "::error::Lens helper deps not bundled"; exit 1; }
-          # every bundled Node binary must embed the pinned version string — catches
-          # a stale cache or wrong archive (v0.2.0 shipped Node 20 this way)
-          NV="$(grep -oE "NODE_VERSION = 'v[0-9][0-9.]*'" build/build.lua | grep -oE 'v[0-9][0-9.]*' | head -1)"
-          for bin in "$B"/node/*/node*; do
-            grep -aq "$NV" "$bin" || { echo "::error::$bin does not embed $NV — stale Node runtime"; exit 1; }
           done
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Info.lua"))'
           lua -e 'assert(loadfile("output/dist/SpeciesTagger.lrplugin/Version.lua"))'
+          test -f "$B/helper/darwin-universal/lens-helper" || { echo "::error::no darwin-universal helper"; exit 1; }
+          file "$B/helper/darwin-universal/lens-helper" | grep -q '2 architectures' \
+            || { echo "::error::the mac helper is not a universal binary"; exit 1; }
+          for k in win-x64 win-arm64; do
+            test -f "$B/helper/$k/lens-helper.exe" || { echo "::error::no $k helper"; exit 1; }
+          done
+          for gone in node lens overlay-inject.js; do
+            test ! -e "$B/$gone" || { echo "::error::$B/$gone is the Node era — it must not ship"; exit 1; }
+          done
+          while IFS= read -r bin; do
+            sz=$(wc -c < "$bin")
+            budget=$((8*1024*1024))
+            case "$bin" in *darwin-universal*) budget=$((16*1024*1024));; esac # two slices
+            [ "$sz" -le "$budget" ] || { echo "::error::$bin is $sz bytes — over budget (dependency creep?)"; exit 1; }
+          done < <(find "$B/helper" -type f)
           for v in mac win all; do
             set -- output/dist/SpeciesTagger-*-"$v".zip
             test -f "$1" || { echo "::error::missing the -$v zip"; exit 1; }
             unzip -t "$1" >/dev/null || { echo "::error::corrupt zip: $1"; exit 1; }
+            if unzip -l "$1" | grep -qE 'lrplugin/(node|lens)/|node_modules'; then
+              echo "::error::the -$v zip still ships Node-era paths"; exit 1
+            fi
           done
           set -- output/dist/SpeciesTagger-*-mac.zip; MAC="$1"
           set -- output/dist/SpeciesTagger-*-win.zip; WIN="$1"
           set -- output/dist/SpeciesTagger-*-all.zip; ALL="$1"
-          unzip -l "$MAC" | grep -q 'node/darwin-' || { echo "::error::mac zip ships no darwin Node"; exit 1; }
-          if unzip -l "$MAC" | grep -q 'node\.exe'; then echo "::error::mac zip contains node.exe"; exit 1; fi
-          unzip -l "$WIN" | grep -q 'node\.exe' || { echo "::error::win zip ships no node.exe"; exit 1; }
-          if unzip -l "$WIN" | grep -q 'node/darwin-'; then echo "::error::win zip contains a darwin Node"; exit 1; fi
-          unzip -l "$ALL" | grep -q 'node/darwin-' || { echo "::error::all zip is missing the darwin Node"; exit 1; }
-          unzip -l "$ALL" | grep -q 'node\.exe' || { echo "::error::all zip is missing node.exe"; exit 1; }
-          echo "zips ok: $(basename "$MAC") $(basename "$WIN") $(basename "$ALL")"
+          unzip -l "$MAC" | grep -q 'helper/darwin-universal/lens-helper' || { echo "::error::mac zip ships no darwin helper"; exit 1; }
+          if unzip -l "$MAC" | grep -q 'lens-helper\.exe'; then echo "::error::mac zip contains a Windows helper"; exit 1; fi
+          unzip -l "$WIN" | grep -q 'helper/win-x64/lens-helper\.exe' || { echo "::error::win zip ships no win-x64 helper"; exit 1; }
+          unzip -l "$WIN" | grep -q 'helper/win-arm64/lens-helper\.exe' || { echo "::error::win zip ships no win-arm64 helper"; exit 1; }
+          if unzip -l "$WIN" | grep -q 'helper/darwin-'; then echo "::error::win zip contains a darwin helper"; exit 1; fi
+          unzip -l "$ALL" | grep -q 'helper/darwin-universal/lens-helper' || { echo "::error::all zip is missing the darwin helper"; exit 1; }
+          unzip -l "$ALL" | grep -q 'lens-helper\.exe' || { echo "::error::all zip is missing the Windows helpers"; exit 1; }
+          echo "bundle + zips ok"
 
       - name: Validate installer + wiki scripts
         # Validation-only (like all of CI): compiles the REAL Windows installer
@@ -124,7 +147,7 @@ jobs:
         # not here; its script still gets a syntax pass.
         run: |
           set -euo pipefail
-          for s in scripts/build-pkg.sh scripts/build-win-installer.sh scripts/sign-win.sh scripts/sync-wiki.sh; do
+          for s in scripts/build-pkg.sh scripts/build-win-installer.sh scripts/sign-win.sh scripts/sync-wiki.sh scripts/check-go-eol.sh; do
             bash -n "$s"
           done
           sudo apt-get -yq install nsis >/dev/null
@@ -147,21 +170,29 @@ jobs:
             output/dist/*.exe
             output/dist/checksums.txt
 
-  # ── Node: drive the REAL Lens helper against a local fake Google (no network) ──
-  lens-helper:
-    runs-on: ubuntu-latest
+  # ── Drive the REAL helper binary on every OS users run (fake Google, no
+  #    network). This matrix is the migration's load-bearing coverage: the
+  #    helper has per-OS build-tagged code (detached spawn, Chrome discovery,
+  #    version detection) that a single-OS CI cannot execute. ────────────────
+  helper-integration:
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ ubuntu-latest, macos-latest, windows-latest ]
+    runs-on: ${{ matrix.os }}
+    defaults:
+      run:
+        shell: bash
     steps:
       - uses: actions/checkout@v7
-      - uses: actions/setup-node@v6
+      - uses: actions/setup-go@v6
         with:
-          node-version: "24"
-          cache: npm
-          cache-dependency-path: scripts/lens/package-lock.json
+          go-version-file: helper/go.mod
+          cache-dependency-path: helper/go.sum
       - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         id: setup-chrome
-      - name: Install the Lens helper deps
-        run: cd scripts/lens && npm ci
-      - name: Interactive challenge-flow + overlay tests (fake Google, headless)
+      - name: Integration suite (scenarios, upload path, lifecycle, trusted click)
+        working-directory: helper
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
-        run: cd scripts/lens && npm test
+        run: go test -tags integration -race -count=1 -v ./lens/

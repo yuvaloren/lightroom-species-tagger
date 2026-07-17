@@ -25,6 +25,7 @@
 Unicode false
 !include "MUI2.nsh"
 !include "FileFunc.nsh"
+!include "x64.nsh"
 
 Name "Species Tagger for Lightroom Classic"
 OutFile "${OUTFILE}"
@@ -62,10 +63,20 @@ VIAddVersionKey "LegalCopyright" "(c) Yuval Oren"
 ; ---- install -------------------------------------------------------------------
 Section "Species Tagger"
 	; Clean upgrade: replace any previous copy wholesale so removed files
-	; never linger inside the plugin folder.
+	; never linger inside the plugin folder (a <=0.3.x install carried a
+	; ~90 MB bundled Node runtime under node/ + lens/ -- this wipes it).
 	RMDir /r "$INSTDIR"
 	SetOutPath "$INSTDIR"
-	File /r "${PAYLOAD}\*.*"
+	; Install only the NATIVE Windows helper. The payload carries win-x64 AND
+	; win-arm64; resolveHelper (Http.lua) runs the first that EXISTS, x64
+	; first. Pruning here gives ARM machines the native arm64 binary (no x64
+	; on disk -> the candidate loop falls through), while zip installs simply
+	; run win-x64 everywhere (emulated on Windows-on-ARM).
+	${If} ${IsNativeARM64}
+		File /r /x "win-x64" "${PAYLOAD}\*.*"
+	${Else}
+		File /r /x "win-arm64" "${PAYLOAD}\*.*"
+	${EndIf}
 
 	WriteUninstaller "$INSTDIR\Uninstall.exe"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "Species Tagger for Lightroom Classic"

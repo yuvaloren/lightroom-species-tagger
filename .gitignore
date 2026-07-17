@@ -47,3 +47,6 @@ spec/**/*.png
 
 # macOS
 .DS_Store
+
+# Go helper build output (make -C helper build/universal)
+helper/dist/

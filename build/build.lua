@@ -39,20 +39,21 @@ local PLUGINS = { 'SpeciesTagger' }
 -- of truth); pulled via LuaRocks at build time and bundled into the .lrplugin.
 local DKJSON_VERSION = '2.10'
 
--- The bundled Node runtime. Pinned here (matches scripts/lens/.nvmrc and CI). Fetched
--- from nodejs.org at build time, cached under output/deps/node (never committed), and
--- copied into the bundle at <plugin>/node/<os-arch>/node[.exe] so the plugin needs no
--- system Node — the user supplies only Google Chrome. Each key maps to Node's own
--- archive kind and the path of the `node` binary inside that archive.
--- Keep this the newest ACTIVE LTS (check https://endoflife.date/nodejs before bumping):
--- CI's weekly guard (scripts/check-node-eol.sh) goes red when the pin nears EOL or
--- drifts from scripts/lens/.nvmrc — never ship an end-of-life runtime to users.
-local NODE_VERSION = 'v24.18.0'
-local NODE_PLATFORMS = {
-	[ 'win-x64' ]      = { archive = 'zip',    bin = 'node.exe' },
-	[ 'win-arm64' ]    = { archive = 'zip',    bin = 'node.exe' },
-	[ 'darwin-x64' ]   = { archive = 'tar.gz', bin = 'bin/node' },
-	[ 'darwin-arm64' ] = { archive = 'tar.gz', bin = 'bin/node' },
+-- The Go lens helper, cross-compiled by `make -C helper universal` into
+-- helper/dist/ and copied into the bundle at <plugin>/helper/<key>/
+-- lens-helper[.exe] — one static binary per platform; the user supplies only
+-- Google Chrome. The Go toolchain pin lives in helper/go.mod, guarded weekly
+-- by scripts/check-go-eol.sh (a custom pin Dependabot cannot see).
+-- A bundle may carry BOTH Windows arches: resolveHelper (src/shared/Http.lua)
+-- prefers win-x64, which runs everywhere (natively on x64, emulated on
+-- Windows-on-ARM), and the NSIS installer installs only the machine's native
+-- one so ARM installs get the arm64 build.
+local HELPER_PLATFORMS = {
+	[ 'darwin-universal' ] = { src = 'darwin-universal/lens-helper',  bin = 'lens-helper' },
+	[ 'darwin-arm64' ]     = { src = 'darwin/arm64/lens-helper',      bin = 'lens-helper' },
+	[ 'darwin-x64' ]       = { src = 'darwin/amd64/lens-helper',      bin = 'lens-helper' },
+	[ 'win-x64' ]          = { src = 'windows/amd64/lens-helper.exe', bin = 'lens-helper.exe' },
+	[ 'win-arm64' ]        = { src = 'windows/arm64/lens-helper.exe', bin = 'lens-helper.exe' },
 }
 
 --------------------------------------------------------------------------------
@@ -186,76 +187,23 @@ local function ensure_dkjson( force )
 end
 
 --------------------------------------------------------------------------------
--- bundled Node runtime (fetched from nodejs.org, cached + bundled — never committed)
+-- bundled Go lens helper (built locally by helper/Makefile — never fetched)
 
--- Which platforms this build bundles a Node runtime for. Default: the Apple-Silicon
--- world (a Windows-on-ARM Parallels guest + an Apple-Silicon Mac), which is this
--- project's setup. Override with ST_NODE_PLATFORMS=win-x64,darwin-x64 (comma-separated).
--- Keep at most ONE arch per OS in a single bundle: resolveNode picks the bundled node by
--- existence, so a fat multi-arch-per-OS bundle would mis-pick on the non-native arch —
--- ship those as separate per-arch release zips instead.
-local function node_platforms()
-	local env = os.getenv( 'ST_NODE_PLATFORMS' )
+-- Which platform keys this build bundles. Default: the release shape (one
+-- universal mac binary + both Windows arches). Override for quick dev
+-- composes with ST_HELPER_PLATFORMS=darwin-arm64 (comma-separated).
+local function helper_platforms()
+	local env = os.getenv( 'ST_HELPER_PLATFORMS' )
 	if env and env:gsub( '%s', '' ) ~= '' then
 		local list = {}
 		for entry in env:gmatch( '[^,]+' ) do
 			local key = ( entry:gsub( '%s', '' ) )
-			if not NODE_PLATFORMS[ key ] then die( 'unknown ST_NODE_PLATFORMS entry: ' .. key ) end
+			if not HELPER_PLATFORMS[ key ] then die( 'unknown ST_HELPER_PLATFORMS entry: ' .. key ) end
 			list[ #list + 1 ] = key
 		end
 		return list
 	end
-	return { 'win-arm64', 'darwin-arm64' }
-end
-
--- Ensure the Node runtime for one platform key is cached under
--- output/deps/node/<NODE_VERSION>/<key>/, fetching + extracting from nodejs.org if
--- absent (cheap once cached, like dkjson). Returns the cached binary path and its
--- filename (node / node.exe).
---
--- The cache path MUST include the version: v0.2.0 shipped an EOL Node 20 in the
--- -mac/-win zips because the old cache was keyed by platform alone, so bumping
--- NODE_VERSION silently reused the stale binaries. verify_node_version() is the
--- belt-and-braces for the same failure: every binary that leaves this function must
--- embed the pinned version string (process.version is ASCII in both Mach-O and PE).
-local function verify_node_version( path )
-	run( string.format( 'grep -aq %q %q', NODE_VERSION, path ) )
-end
-
-local function ensure_one_node( key )
-	local spec = NODE_PLATFORMS[ key ]
-	if not spec then die( 'unknown node platform: ' .. key ) end
-	local binName = ( spec.bin:match( '([^/]+)$' ) )
-	local destDir = DEPS .. '/node/' .. NODE_VERSION .. '/' .. key
-	local cached = destDir .. '/' .. binName
-	if exists( cached ) then
-		verify_node_version( cached )
-		return cached, binName
-	end
-	if not have_tool( 'curl' ) then die( 'curl is required to fetch the bundled Node runtime' ) end
-	mkdirp( destDir )
-	local base = 'node-' .. NODE_VERSION .. '-' .. key
-	local url = 'https://nodejs.org/dist/' .. NODE_VERSION .. '/' .. base .. '.' .. spec.archive
-	local tmp = DEPS .. '/node/.dl-' .. key
-	rmtree( tmp )
-	mkdirp( tmp )
-	local ar = tmp .. '/' .. base .. '.' .. spec.archive
-	log( 'fetching Node ' .. NODE_VERSION .. ' (' .. key .. ')…' )
-	run( string.format( 'curl -fsSL -o %q %q', ar, url ) )
-	if spec.archive == 'zip' then
-		if not have_tool( 'unzip' ) then die( 'unzip is required to extract the bundled Node (Windows)' ) end
-		run( string.format( 'cd %q && unzip -oq %q', tmp, ar ) )
-	else
-		run( string.format( 'tar -xzf %q -C %q', ar, tmp ) )
-	end
-	local extracted = tmp .. '/' .. base .. '/' .. spec.bin
-	if not exists( extracted ) then die( 'unexpected Node archive layout: missing ' .. extracted ) end
-	copy_file( extracted, cached )
-	if binName == 'node' then run( string.format( 'chmod +x %q', cached ) ) end
-	rmtree( tmp )
-	verify_node_version( cached )
-	log( 'cached Node -> ' .. cached )
-	return cached, binName
+	return { 'darwin-universal', 'win-x64', 'win-arm64' }
 end
 
 --------------------------------------------------------------------------------
@@ -435,30 +383,23 @@ local function compose( label )
 		-- the pulled dependency, bundled flat
 		copy_file( dkjson, outdir .. '/dkjson.lua' )
 
-		-- the Google Lens browser helper (Node + Chrome) — bundled so the Lens
-		-- backend can shell out to it at <plugin>/lens/lens-search.js. node_modules
-		-- (puppeteer-core) must be present: run `cd scripts/lens && npm i` first.
-		local lensSrc = ROOT .. '/scripts/lens'
-		if exists( lensSrc .. '/lens-search.js' ) then
-			if not exists( lensSrc .. '/node_modules' ) then
-				die( 'scripts/lens/node_modules is missing — the bundle must be self-contained ' ..
-					'(the Lens helper ships with its deps, nothing for users to npm install). ' ..
-					'Run `cd scripts/lens && npm ci`, then rebuild.' )
+		-- The Go lens helper, so recognition needs nothing but Chrome installed.
+		-- Copied to <plugin>/helper/<key>/lens-helper[.exe]; resolveHelper
+		-- (src/shared/Http.lua) picks the bundled binary by existence.
+		for _, key in ipairs( helper_platforms() ) do
+			local spec = HELPER_PLATFORMS[ key ]
+			local src = ROOT .. '/helper/dist/' .. spec.src
+			if not exists( src ) then
+				die( 'helper binary missing: ' .. src ..
+					' — build it first: make -C helper universal' )
 			end
-			run( string.format( 'cp -R %q %q', lensSrc, outdir .. '/lens' ) )
-			log( 'bundled Google Lens helper -> ' .. outdir .. '/lens' )
-		end
-
-		-- The bundled Node runtime(s), so the Lens backend runs the helper with NO system
-		-- Node — the user supplies only Chrome. Copied to <plugin>/node/<os-arch>/node[.exe];
-		-- resolveNode (src/shared/Http.lua) prefers these over any system install.
-		for _, key in ipairs( node_platforms() ) do
-			local cached, binName = ensure_one_node( key )
-			local nodeDir = outdir .. '/node/' .. key
-			mkdirp( nodeDir )
-			run( string.format( 'cp %q %q', cached, nodeDir .. '/' .. binName ) )
-			if binName == 'node' then run( string.format( 'chmod +x %q', nodeDir .. '/' .. binName ) ) end
-			log( 'bundled Node runtime (' .. key .. ') -> ' .. nodeDir .. '/' .. binName )
+			local helperDir = outdir .. '/helper/' .. key
+			mkdirp( helperDir )
+			run( string.format( 'cp %q %q', src, helperDir .. '/' .. spec.bin ) )
+			if not spec.bin:match( '%.exe$' ) then
+				run( string.format( 'chmod +x %q', helperDir .. '/' .. spec.bin ) )
+			end
+			log( 'bundled lens helper (' .. key .. ') -> ' .. helperDir .. '/' .. spec.bin )
 		end
 
 		stamp_info( outdir .. '/Info.lua', major, minor, patch, build, label )

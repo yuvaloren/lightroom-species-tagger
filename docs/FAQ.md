@@ -8,9 +8,9 @@ species; the plugin then turns your pick into canonical names via GBIF.
 ### Does it cost money? Do I need an API key?
 No money, and **no API key for anything**. Google Lens is keyless and GBIF (the taxonomy)
 is free and keyless. You only need **Google Chrome** installed, because the plugin opens
-Lens in your real Chrome. The released bundle is self-contained — it ships its own Node
-runtime and the Lens helper's dependencies, so there's no Node to install and nothing to
-`npm install`.
+Lens in your real Chrome. The released bundle is self-contained — recognition is
+driven by a small native helper (~6 MB) bundled inside; there is nothing to install
+beyond Chrome.
 
 ### How accurate is it?
 It's as accurate as the name **you** pick. The plugin doesn't guess — it shows you
@@ -20,8 +20,8 @@ accepted Latin name, preferred common name, and classification. Run it from a no
 tag is simply left untouched.
 
 ### Does it run on Windows?
-Yes — **macOS and Windows** are both supported. The Lens helper locates Chrome and
-Node on each automatically.
+Yes — **macOS and Windows** are both supported (x64 and ARM64 on both). The Lens
+helper locates your installed Chrome automatically.
 
 ### Can I add keywords to the search?
 Yes — use **Google's own search box** on the Lens page to add words (`juvenile`, `reef`) or

@@ -24,9 +24,9 @@ existing files changed.
 
 ### The Lens window doesn't open / “helper produced no output”
 The Lens step opens your installed Chrome via a helper that runs on the plugin's own
-bundled Node runtime. Check:
-- **Google Chrome installed.** Node ships inside the plugin (per-OS binary) and the helper's
-  deps are bundled too, so there's no Node to install and nothing to `npm install`. The
+bundled lens helper. Check:
+- **Google Chrome installed.** The helper is a small native binary that ships inside
+  the plugin (per-OS, under `helper/`), so there is nothing else to install. The
   helper finds your Chrome automatically on macOS / Windows (override with
   `LENS_CHROME`).
 - Run from a normal home (residential) connection — Google challenges datacenter/VPN/shared

@@ -23,7 +23,7 @@ unit-tested offline with no network and no Lightroom.
 │  src/shared/                   Pure, network-free, unit-tested core.  │
 │    SelectedName · Taxonomy · Keywords · Config · Http (adapter) · Log │
 ├─────────────────────────────────────────────────────────────────────┤
-│  scripts/lens/                 Node/Puppeteer helper — opens Lens,    │
+│  helper/ (Go lens helper)     native CDP helper — opens Lens,       │
 │                                shows the Tag bar, returns your pick.  │
 │    lens-search.js · overlay-inject.js · test/                        │
 └─────────────────────────────────────────────────────────────────────┘
@@ -32,7 +32,7 @@ unit-tested offline with no network and no Lightroom.
 Each layer changes for a different reason and is tested a different way. The pure core
 holds the logic and has no dependency you can't fake in a spec. The Lightroom glue is
 thin on purpose — if you're writing logic there, it probably belongs in `src/shared/`.
-The Node helper is quarantined because it's the brittle part (it drives a real browser);
+The lens helper is quarantined because it's the brittle part (it drives a real browser);
 keeping it behind the `Http` seam means the rest of the system only ever sees "the string
 the user highlighted."
 
@@ -48,7 +48,8 @@ the user highlighted."
 
 1. **Render** — `TagSpecies.jpegBytes` asks Lightroom for a downsized JPEG (strips the
    original EXIF/GPS).
-2. **Show Lens** — the Node helper (`scripts/lens`, driven via `Http.lensAssistAdapter`)
+2. **Show Lens** — the lens helper (a static Go binary built from `helper/`,
+   driven via `Http.lensAssistAdapter`)
    uploads the image the way the Lens website does and opens the results in a **visible**
    Chrome window, injecting a bottom bar (Tag / Skip / an "m of n" counter). One window
    is reused across photos (fresh tab each) and closed cleanly at the end.

@@ -119,7 +119,6 @@ function M.run( _ )
 	end
 
 	local assist = Http.lensAssistAdapter {
-		helperPath = LrPathUtils.child( _PLUGIN.path, 'lens/lens-search.js' ),
 		pluginPath = _PLUGIN.path,
 		tabsPort = ASSIST_PORT,
 	}

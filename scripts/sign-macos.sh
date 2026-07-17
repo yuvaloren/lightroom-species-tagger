@@ -1,30 +1,30 @@
 #!/usr/bin/env bash
 # sign-macos.sh — turn a freshly composed SpeciesTagger.lrplugin into a signed,
-# notarized, universal-Node release zip for macOS.
+# notarized release zip set for macOS.
 #
-# The plugin bundles a per-OS Node runtime. On macOS that binary is the one thing
-# that breaks a plain download: an unsigned binary that arrives quarantined (browser
-# download + Finder unzip) is blocked by Gatekeeper on first run. This script fixes it
-# at the source:
-#   1. lipo the two official darwin Node builds (arm64 + x64) into ONE universal binary
-#      so a single bundle runs natively on Apple Silicon AND Intel — no plugin change
-#      (resolveNode still finds node/darwin-arm64/node, which is now universal).
-#   2. codesign every Mach-O in the bundle (the Node binary + the Lens helper's native
-#      addons, e.g. bare-* *.bare files) with a Developer ID identity + hardened runtime.
+# The plugin bundles one native binary: the Go lens helper at
+# helper/darwin-universal/lens-helper (universal2, built by
+# `make -C helper universal`). An unsigned binary that arrives quarantined
+# (browser download + Finder unzip) is blocked by Gatekeeper on first run, so:
+#   1. verify the bundled helper really is universal (arm64 + x86_64) — the
+#      Makefile lipos it; this script never builds or fetches anything.
+#   2. codesign every Mach-O in the bundle with a Developer ID identity +
+#      hardened runtime + timestamp. Go binaries need NO entitlements (no JIT
+#      — the old Node runtime needed allow-jit; that whole story is gone).
 #   3. package the three per-platform zips via scripts/package-zips.sh
 #      (SpeciesTagger-<version>-mac/-win/-all.zip + checksums.txt).
-#   4. notarize the mac-containing zips (-mac and -all) with notarytool (Gatekeeper
-#      then clears them on first run; a bare binary/folder can't be stapled, but the
-#      plugin is online anyway). The -win zip needs none — its node.exe is already
-#      Authenticode-signed by the OpenJS Foundation.
+#   4. notarize the mac-containing zips (-mac and -all) with notarytool.
+#      The -win zip ships no Mach-O, so it needs none. (NOTE: unlike the old
+#      OpenJS-signed node.exe, lens-helper.exe is NOT Authenticode-signed
+#      until Azure Trusted Signing lands — sign-win.sh remains the hook.)
 #
-# Run it AFTER composing the bundle:
-#   ST_NODE_PLATFORMS=darwin-arm64,win-x64 lua build/build.lua --no-zip
+# Run it AFTER building the helper and composing the bundle:
+#   make -C helper universal
+#   bash build.sh --no-zip
 #   bash scripts/sign-macos.sh
 #
-# Signing/notarization need an Apple Developer ID (see docs/SIGNING.md). Until you have
-# it, run with --allow-unsigned to do the universal-binary + repackage steps only (handy
-# to validate the lipo path now; the resulting zip is NOT for distribution).
+# Signing/notarization need an Apple Developer ID (see docs/SIGNING.md). Until
+# you have it, run with --allow-unsigned to package only (NOT distributable).
 #
 # macOS only (needs lipo / codesign / xcrun).
 set -euo pipefail
@@ -49,9 +49,9 @@ done
 
 DIST="output/dist"
 BUNDLE="$DIST/SpeciesTagger.lrplugin"
-NODE_BIN="$BUNDLE/node/darwin-arm64/node"
-[ -d "$BUNDLE" ] || die "no bundle at $BUNDLE — compose first: ST_NODE_PLATFORMS=darwin-arm64,win-x64 lua build/build.lua --no-zip"
-[ -f "$NODE_BIN" ] || die "expected arm64 Node at $NODE_BIN — compose with ST_NODE_PLATFORMS including darwin-arm64"
+HELPER_BIN="$BUNDLE/helper/darwin-universal/lens-helper"
+[ -d "$BUNDLE" ] || die "no bundle at $BUNDLE — compose first: make -C helper universal && bash build.sh --no-zip"
+[ -f "$HELPER_BIN" ] || die "expected the universal helper at $HELPER_BIN — compose with darwin-universal (the default)"
 
 # ---- version (mirror build.lua's resolution) --------------------------------
 resolve_version() {
@@ -66,53 +66,25 @@ VERSION="$(resolve_version)"
 ZIP_MAC="SpeciesTagger-$VERSION-mac.zip"
 ZIP_ALL="SpeciesTagger-$VERSION-all.zip"
 
-# ---- pinned Node version (single source of truth = build/build.lua) ---------
-NODE_VERSION="$(grep -oE "NODE_VERSION = 'v[0-9][0-9.]*'" build/build.lua | grep -oE 'v[0-9][0-9.]*' | head -1)"
-[ -n "$NODE_VERSION" ] || die "could not read NODE_VERSION from build/build.lua"
-
 # ---- will we sign this run? -------------------------------------------------
 DO_SIGN=1
 if [ "$ALLOW_UNSIGNED" = "1" ] && [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then DO_SIGN=0; fi
 if [ "$DO_SIGN" = "1" ] && [ -z "${MACOS_SIGN_IDENTITY:-}" ]; then
-	die "MACOS_SIGN_IDENTITY is required to sign (or pass --allow-unsigned to build the universal binary only). See docs/SIGNING.md"
+	die "MACOS_SIGN_IDENTITY is required to sign (or pass --allow-unsigned to package only). See docs/SIGNING.md"
 fi
-say "Node $NODE_VERSION · plugin $VERSION · sign=$DO_SIGN"
+say "helper $(du -h "$HELPER_BIN" | cut -f1 | tr -d ' ') · plugin $VERSION · sign=$DO_SIGN"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-# ---- 1. universal Node via lipo ---------------------------------------------
-# The bundle already carries the arm64 slice; fetch the x64 slice from nodejs.org and
-# lipo them into one universal binary in place.
-if lipo -info "$NODE_BIN" 2>/dev/null | grep -q 'x86_64'; then
-	say "node is already universal — skipping lipo"
-else
-	X64_TGZ="node-$NODE_VERSION-darwin-x64.tar.gz"
-	say "fetching darwin-x64 Node ($NODE_VERSION) for the universal binary…"
-	curl -fsSL -o "$TMP/$X64_TGZ" "https://nodejs.org/dist/$NODE_VERSION/$X64_TGZ"
-	tar -xzf "$TMP/$X64_TGZ" -C "$TMP"
-	X64_BIN="$TMP/node-$NODE_VERSION-darwin-x64/bin/node"
-	[ -f "$X64_BIN" ] || die "unexpected Node archive layout: missing $X64_BIN"
-	say "lipo: arm64 (bundled) + x86_64 (fetched) -> universal"
-	lipo -create "$NODE_BIN" "$X64_BIN" -output "$TMP/node.universal"
-	chmod +x "$TMP/node.universal"
-	mv "$TMP/node.universal" "$NODE_BIN"
-fi
-lipo -info "$NODE_BIN"
-
-# ---- 1b. drop prebuilt native addons for platforms we never run -------------
-# The Lens helper's node_modules ships bare-*/prebuilds/<platform>/*.bare native binaries
-# for many platforms. This plugin only runs under Node on macOS or Windows, so the
-# iOS-simulator / linux / android prebuilds are dead weight — and Apple's guidance is that
-# code you never run needn't be signed or ticketed. Strip them (keeps darwin + win32).
-for plat in ios android linux; do
-	find "$BUNDLE" -type d -path "*/prebuilds/${plat}-*" -exec rm -rf {} + 2>/dev/null || true
-done
+# ---- 1. the helper must be universal (arm64 + x86_64) ------------------------
+lipo -info "$HELPER_BIN"
+lipo -info "$HELPER_BIN" 2>/dev/null | grep -q 'x86_64' || die "helper is not universal — run: make -C helper universal"
+lipo -info "$HELPER_BIN" 2>/dev/null | grep -q 'arm64'  || die "helper is not universal — run: make -C helper universal"
 
 # ---- 2. codesign every Mach-O (Developer ID + hardened runtime) --------------
-# The bundled Node is NOT the only native code: darwin/win32 native addons (bare-* *.bare)
-# are Mach-O too. Apple rejects the archive if ANY Mach-O is unsigned, so we sign every
-# Mach-O we find. The Node binary ALSO needs JIT entitlements (below) or V8 is killed by
-# the hardened runtime at runtime.
+# The Go helper is the only native code in the bundle today, but the find-all
+# loop stays: if another binary ever sneaks in, Apple rejects an archive with
+# ANY unsigned Mach-O — better to sign it than to be surprised at notary time.
 if [ "$DO_SIGN" = "1" ]; then
 	# CI: import the Developer ID cert from a base64 .p12 into a throwaway keychain.
 	# Local: the identity is already in your login keychain, so this block is skipped.
@@ -128,38 +100,16 @@ if [ "$DO_SIGN" = "1" ]; then
 		security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KCPW" "$KC" >/dev/null
 		security list-keychains -d user -s "$KC" "$(security default-keychain -d user | xargs)"
 	fi
-	# The Node binary runs V8, which JITs. Under the hardened runtime, JIT is killed unless
-	# these entitlements are present — and `codesign --force` WITHOUT --entitlements strips
-	# the ones the official Node ships with. Omit the debug `get-task-allow` (notarization
-	# forbids it). Only the main Node executable needs these; the .bare addons don't JIT.
-	ENTITLEMENTS="$TMP/node-entitlements.plist"
-	cat > "$ENTITLEMENTS" <<'PLIST'
-<?xml version="1.0" encoding="UTF-8"?>
-<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
-<plist version="1.0">
-<dict>
-<key>com.apple.security.cs.allow-jit</key><true/>
-<key>com.apple.security.cs.allow-unsigned-executable-memory</key><true/>
-<key>com.apple.security.cs.disable-library-validation</key><true/>
-</dict>
-</plist>
-PLIST
 	say "codesign every Mach-O in the bundle (Developer ID + hardened runtime + timestamp)"
 	signed=0
 	while IFS= read -r -d '' f; do
 		if file "$f" 2>/dev/null | grep -q 'Mach-O'; then
-			if [ "$f" = "$NODE_BIN" ]; then
-				codesign --force --options runtime --timestamp --entitlements "$ENTITLEMENTS" --sign "$MACOS_SIGN_IDENTITY" "$f"
-			else
-				codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$f"
-			fi
+			codesign --force --options runtime --timestamp --sign "$MACOS_SIGN_IDENTITY" "$f"
 			signed=$(( signed + 1 ))
 		fi
 	done < <( find "$BUNDLE" -type f -print0 )
 	say "signed $signed Mach-O binaries"
-	codesign --verify --strict --verbose=2 "$NODE_BIN"
-	codesign -d --entitlements - "$NODE_BIN" 2>/dev/null | grep -q 'allow-jit' \
-		|| die "Node lacks the allow-jit entitlement — it would crash under the hardened runtime"
+	codesign --verify --strict --verbose=2 "$HELPER_BIN"
 fi
 
 # ---- 3. package the three distributable zips + checksums ---------------------
@@ -168,12 +118,11 @@ fi
 # itself is untouched, and every Mach-O carries its own signature).
 say "packaging the release zips (scripts/package-zips.sh)"
 bash scripts/package-zips.sh "$VERSION"
-[ -f "$DIST/$ZIP_MAC" ] || die "packaging produced no $ZIP_MAC — compose with ST_NODE_PLATFORMS including darwin-arm64"
+[ -f "$DIST/$ZIP_MAC" ] || die "packaging produced no $ZIP_MAC — compose with darwin-universal (the default)"
 [ -f "$DIST/$ZIP_ALL" ] || die "packaging produced no $ZIP_ALL"
 
 # ---- 4. notarize the mac-containing zips -------------------------------------
-# The -win zip ships no Mach-O (its node.exe is already Authenticode-signed), so
-# only -mac and -all are submitted.
+# The -win zip ships no Mach-O, so only -mac and -all are submitted.
 if [ "$DO_SIGN" = "1" ]; then
 	notary_args=()
 	if [ -n "${NOTARY_KEY_P8_BASE64:-}" ]; then
@@ -207,8 +156,8 @@ if [ "$DO_SIGN" = "1" ]; then
 fi
 
 if [ "$DO_SIGN" = "1" ]; then
-	say "done — signed + notarized: $DIST/$ZIP_MAC, $DIST/$ZIP_ALL (+ win zip, Authenticode-signed node.exe)"
+	say "done — signed + notarized: $DIST/$ZIP_MAC, $DIST/$ZIP_ALL (+ win zip; lens-helper.exe unsigned until Azure Trusted Signing lands)"
 else
-	say "done — UNSIGNED (universal binary only, testing use): $DIST/SpeciesTagger-$VERSION-{mac,win,all}.zip"
+	say "done — UNSIGNED (packaging only, testing use): $DIST/SpeciesTagger-$VERSION-{mac,win,all}.zip"
 	say "re-run with a Developer ID identity + notary credentials for a distributable build."
 fi

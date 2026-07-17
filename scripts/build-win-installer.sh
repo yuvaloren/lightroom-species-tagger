@@ -44,9 +44,9 @@ say "extracting payload from $(basename "$ZIP_WIN")"
 if command -v ditto >/dev/null 2>&1; then ditto -x -k "$ZIP_WIN" "$TMP"; else unzip -q "$ZIP_WIN" -d "$TMP"; fi
 PAYLOAD="$TMP/SpeciesTagger.lrplugin"
 [ -d "$PAYLOAD" ] || die "unexpected zip layout — no top-level SpeciesTagger.lrplugin/"
-# Same existence contract as package-zips.sh: ANY win-* Node runtime (releases
-# ship win-x64; CI's default compose bundles win-arm64 — see build.lua).
-compgen -G "$PAYLOAD/node/win-*/node.exe" >/dev/null || die "payload has no node/win-*/node.exe"
+# Same existence contract as package-zips.sh: the -win zip carries BOTH
+# Windows helper arches; SpeciesTagger.nsi installs only the native one.
+compgen -G "$PAYLOAD/helper/win-*/lens-helper.exe" >/dev/null || die "payload has no helper/win-*/lens-helper.exe"
 
 say "compiling the installer (makensis)"
 rm -f "$OUT"

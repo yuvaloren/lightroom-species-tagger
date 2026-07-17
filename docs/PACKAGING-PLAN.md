@@ -1,5 +1,13 @@
 # Plan: Release packaging + CI health for Species Tagger — v0.2.0
 
+> **Superseded in part (2026-07-17):** the bundled **Node runtime described
+> below was replaced by a single static Go binary** (`helper/`, ~6 MB per
+> platform — see `helper/README.md` and `docs/ARCHITECTURE.md`). The
+> packaging/installer *mechanics* here (zip variants, pkg/NSIS flow, signing
+> split) still stand; read every mention of `node/<os-arch>/node[.exe]` as
+> `helper/<key>/lens-helper[.exe]`, and size figures are ~10-40x smaller.
+
+
 *Planning doc — 2026-07-09, rev 2 (incorporates Yuval's feedback). Companion to
 [INSTALLERS-PLAN.md](INSTALLERS-PLAN.md). All of this ships as **v0.2.0** (dev label
 `0.2.0-dev` while in progress).*

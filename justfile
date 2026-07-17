@@ -42,13 +42,27 @@ coverage: _deps
     luacov
     @tail -n 25 luacov.report.out
 
-# drive the REAL assist helper against a local fake Google (no network). Needs Node +
-# Chrome + `cd scripts/lens && npm i`. Not in `just check`.
-lens-test:
-    cd scripts/lens && npm test
+# the Go lens helper: unit suite (race detector on)
+helper-test:
+    make -C helper test
+
+# drive the REAL compiled helper against a local fake Google (no network).
+# Needs Chrome (LENS_CHROME to point at one). Not in `just check`.
+helper-itest:
+    make -C helper itest
+
+# cross-compile every helper target + the universal mac binary (build needs this)
+helper:
+    make -C helper universal
+
+# live smoke against REAL Google: full upload flow in a headed Chrome, the
+# human's Tag press stood in for over the debug port. Run before releases on
+# the Mac AND the Windows VM. Never in CI (network + ToS).
+lens-live:
+    cd helper && go test -tags live -count=1 -v -run TestLiveSmoke ./lens/
 
 # compose the bundle into output/dist (version from VERSION / tag), zip + checksums
-build:
+build: helper
     lua build/build.lua
 
 # build, then install a full plugin copy into ~/Documents/Lightroom Plugins
@@ -65,8 +79,8 @@ uninstall:
 changelog:
     git cliff --output CHANGELOG.md
 
-# full local gate before pushing: lint + test + build
-check: lint test build
+# full local gate before pushing: lint + Lua tests + Go tests + build
+check: lint test helper-test build
 
 # Remove EVERYTHING generated — the output/ tree (bundle + pulled deps) + coverage
 # artifacts. Plain rm by decision (Yuval, 2026-07-10): earlier mv-to-trash indirection
@@ -76,6 +90,7 @@ check: lint test build
 clean:
     rm -rf output .output-trash-*
     rm -f luacov.stats.out luacov.report.out
+    make -C helper clean
 
 # a full reset: also drop the pinned Lua toolchain + the Lens helper's node_modules
 # (re-create them with ./dev-setup.sh and `cd scripts/lens && npm ci`)

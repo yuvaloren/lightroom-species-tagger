@@ -10,9 +10,9 @@
 # already signed. Pruning COPIES after signing is safe: every Mach-O is signed
 # individually and a folder has no bundle-level signature. Produces in output/dist:
 #
-#   SpeciesTagger-<ver>-mac.zip   darwin Node runtime(s) only + darwin native prebuilds
-#   SpeciesTagger-<ver>-win.zip   node.exe only + win32 native prebuilds
-#   SpeciesTagger-<ver>-all.zip   both runtimes — single-package channels
+#   SpeciesTagger-<ver>-mac.zip   the darwin (universal) helper only
+#   SpeciesTagger-<ver>-win.zip   the Windows helpers only (win-x64 + win-arm64)
+#   SpeciesTagger-<ver>-all.zip   every helper — single-package channels
 #                                 (e.g. Adobe Exchange) take this one
 #   checksums.txt                 sha256 for every zip produced
 #
@@ -41,16 +41,6 @@ BUNDLE="$DIST/SpeciesTagger.lrplugin"
 
 TMP="$(mktemp -d)"; trap 'rm -rf "$TMP"' EXIT
 
-# Native prebuilds for platforms the plugin never runs on are dead weight in every
-# variant (it only ever runs under Node on macOS or Windows).
-prune_prebuilds() { # $1 = tree, $2.. = prebuild platform prefixes to drop
-	local tree="$1"; shift
-	local plat
-	for plat in "$@"; do
-		find "$tree" -type d -path "*/prebuilds/${plat}-*" -exec rm -rf {} + 2>/dev/null || true
-	done
-}
-
 ZIPS=()
 make_zip() { # $1 = variant: mac | win | all
 	local variant="$1"
@@ -61,21 +51,18 @@ make_zip() { # $1 = variant: mac | win | all
 	cp -R "$BUNDLE" "$tree"
 	# Finder droppings must never ship (Adobe Exchange flags .DS_Store in packages).
 	find "$tree" -name '.DS_Store' -delete 2>/dev/null || true
-	prune_prebuilds "$tree" ios android linux
 	case "$variant" in
 		mac)
-			rm -rf "$tree/node/win-"*
-			prune_prebuilds "$tree" win32
-			if ! compgen -G "$tree/node/darwin-*/node" >/dev/null; then
-				say "WARNING: bundle has no darwin Node — skipping $zipname"
+			rm -rf "$tree/helper/win-"*
+			if ! compgen -G "$tree/helper/darwin-*/lens-helper" >/dev/null; then
+				say "WARNING: bundle has no darwin helper — skipping $zipname"
 				return 0
 			fi
 			;;
 		win)
-			rm -rf "$tree/node/darwin-"*
-			prune_prebuilds "$tree" darwin
-			if ! compgen -G "$tree/node/win-*/node.exe" >/dev/null; then
-				say "WARNING: bundle has no node.exe — skipping $zipname"
+			rm -rf "$tree/helper/darwin-"*
+			if ! compgen -G "$tree/helper/win-*/lens-helper.exe" >/dev/null; then
+				say "WARNING: bundle has no lens-helper.exe — skipping $zipname"
 				return 0
 			fi
 			;;

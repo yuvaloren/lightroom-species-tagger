@@ -1,5 +1,13 @@
 # Plan: Distribution & signing for Species Tagger
 
+> **Superseded in part (2026-07-17):** the bundled **Node runtime described
+> below was replaced by a single static Go binary** (`helper/`, ~6 MB per
+> platform — see `helper/README.md` and `docs/ARCHITECTURE.md`). The
+> packaging/installer *mechanics* here (zip variants, pkg/NSIS flow, signing
+> split) still stand; read every mention of `node/<os-arch>/node[.exe]` as
+> `helper/<key>/lens-helper[.exe]`, and size figures are ~10-40x smaller.
+
+
 *Lightroom Classic plugin. Planning doc — updated 2026-07-09. Pivoted to **sign + notarize
 the bundled binary**; native installers and Adobe Exchange are now optional later layers.*
 

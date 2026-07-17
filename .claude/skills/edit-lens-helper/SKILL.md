@@ -1,53 +1,72 @@
 ---
 name: edit-lens-helper
-description: Change the Node/Puppeteer Google Lens helper (scripts/lens) without breaking the invariants that keep it compliant, robust, and cross-platform. Use when editing the assist overlay, the window reuse / launch / close, the upload, or the Tag polling in scripts/lens/.
+description: Change the Go Google Lens helper (helper/) without breaking the invariants that keep it compliant, robust, and cross-platform. Use when editing the assist overlay, the window reuse / launch / close, the upload, or the Tag polling in helper/.
 ---
 
 # Edit the Lens helper
 
-`scripts/lens/lens-search.js` opens Google Lens in the user's visible Chrome and returns
-ONLY the species name the user highlighted. Its header comment is the spec; read it first.
-These invariants are load-bearing — preserve every one.
+The helper is a single static Go binary (`helper/`, built by `make -C helper
+universal`) that opens Google Lens in the user's visible Chrome over the Chrome
+DevTools Protocol and returns ONLY the species name the user highlighted.
+`helper/lens/session.go` is the orchestrator; `helper/cdp/` is a deliberately
+minimal hand-rolled CDP client. These invariants are load-bearing — preserve
+every one.
 
 ## Invariants (don't break these)
 
 - **Never scrape Google's results.** This is the whole compliance story. Read only
-  `window.getSelection()` (via the page globals `window.__stTag` / `window.__stSkip` that
-  Node polls). Do NOT walk the results DOM, read the AI Overview, or harvest match titles.
-- **No exposeFunction for the Tag/Skip signal.** Use the polled page globals — that's what
-  lets the helper reconnect to the reused window across photos. Adding `exposeFunction`
-  back would break on the second photo (the binding persists but points at a dead process).
-- **Never `innerHTML` or `eval` page content.** Build the overlay with `createElement` +
-  `textContent` only (see `overlay-inject.js`).
-- **Respect the window lifecycle.** One detached window is launched on the debug port and
-  *reused* (a fresh tab per photo, the others closed); each per-photo run `disconnect`s
-  (never kills) so the window survives; the run's end sends `LENS_ASSIST_CLOSE` which
-  `browser.close()`s it cleanly (no "didn't shut down correctly" prompt). Keep that split.
-- **No anti-detection.** No `--no-sandbox` on a real launch (headless test only), no
-  `navigator.webdriver` spoof. The UA/Client-Hints match is only so Google renders the
-  normal page; the window is visible.
-- **Cross-platform.** Chrome discovery (`findChrome`) and the shell-free `curl`/`spawn`
-  calls must keep working on macOS / Windows.
-- **Output contract.** Exactly one line of JSON on stdout: `{ ok:true, name }` |
-  `{ ok:false, cancelled }` (Skip) | `{ ok:false, error }` (timeout/error) |
-  `{ ok:true, closed:true }` (the close command). Debug goes to stderr.
+  the user's selection (via the page globals `window.__stTag` / `window.__stSkip`
+  that the helper POLLS). Do NOT walk the results DOM, read the AI Overview, or
+  harvest match titles.
+- **Poll page globals; never install page↔helper bindings.** Polling is what lets
+  a fresh helper process reconnect to the reused window across photos.
+- **Never `innerHTML` or `eval` page content.** The overlay
+  (`helper/lens/overlay_inject.js`, embedded via `go:embed`) builds all UI with
+  `createElement` + `textContent`. Its `tagBtn.onmousedown` preventDefault is a
+  shipped-bug fix — the trusted-click test guards it.
+- **Respect the window lifecycle.** One DETACHED Chrome is launched on the debug
+  port and *reused* (a fresh tab per photo, the others closed); each per-photo run
+  disconnects (never kills) so the window survives; the run's end sends
+  `LENS_ASSIST_CLOSE`, which `Browser.close`s it cleanly (no "didn't shut down
+  correctly" prompt). Keep that split — the detached-lifecycle test asserts it.
+- **No anti-detection.** No `--no-sandbox` on a real launch (headless test only),
+  no `navigator.webdriver` spoof. The UA/Client-Hints match (golden-tested) is
+  only so Google renders the normal page; the window is visible.
+- **Cross-platform.** Chrome discovery, spawn (per-OS build tags in
+  `helper/chrome/spawn_*.go`), and Windows version detection (directory listing,
+  NEVER `chrome.exe --version` — it pops a window) must keep working. CI runs the
+  integration suite on ubuntu + macos + windows.
+- **Keep the binary small.** The hand-rolled CDP client exists so the shipped
+  binary stays ~6 MB. Do not add `chromedp`/`cdproto` or other heavyweight deps —
+  CI's size budget (8 MB per single-arch binary) will fail the build.
+- **Output contract.** Exactly one line of JSON on stdout, ALWAYS exit 0:
+  `{ ok:true, name }` | `{ ok:false, cancelled }` (Skip) | `{ ok:false, error }`
+  (timeout/error) | `{ ok:true, closed:true }` (close). Debug goes to stderr.
+  The Lua side (`src/shared/Http.lua` runHelper/interpretTagResult) parses this.
 
 ## Test the change (no network, no Google)
 
 ```bash
-cd scripts/lens && npm ci && npm test      # drives the real helper against a fake Google
+just helper-test    # unit suite (CDP framing, UA goldens, profile-clean, contract)
+just helper-itest   # real compiled helper vs a local fake Google: ten scenarios,
+                    # the upload path, detached lifecycle, trusted click
 ```
 
-Or `just lens-test`. It exercises the whole assist round-trip headlessly — highlight + Tag
-→ name, Skip → cancelled, timeout, window reuse across scenarios, and clean close.
+Both run with the race detector. CI repeats `helper-itest` on all three OSes.
 
-## What can't be tested here
+## Live verification (network; before releases)
 
-The real Google DOM, the upload against live Google, and the Lightroom keyword write can't
-be exercised offline. After a helper change, verify once in Lightroom on a residential
-network. To inspect a real run, `LENS_DEBUG=1 node lens-search.js photo.jpg`.
+```bash
+just lens-live      # REAL Google, headed Chrome, ~30 s: uploads a generated JPEG,
+                    # stands in for the human's Tag press over the debug port
+```
+
+Run it on the Mac and the Windows VM. Residential network — Google challenges
+datacenter/VPN IPs. After a helper change, also verify once inside Lightroom.
+To inspect a real run: `LENS_DEBUG=1 helper/dist/<os>/<arch>/lens-helper photo.jpg`.
 
 ## Scope
 
-Keep it a helper, not a framework: one auditable file behind the `Http` seam. Precision is
-GBIF's job downstream; this just hands back the string the user picked.
+Keep it a helper, not a framework: a small auditable Go module behind the `Http`
+seam. Precision is GBIF's job downstream; this just hands back the string the
+user picked.

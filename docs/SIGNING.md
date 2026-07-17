@@ -1,20 +1,23 @@
 # Signing & notarizing macOS releases
 
-The plugin bundles a per-OS Node runtime. On macOS that binary is the one thing that
-breaks a plain download: an **unsigned** binary that arrives **quarantined** (a browser
-download, then a Finder unzip) is blocked by Gatekeeper on first run. Local builds never
-hit this because `curl`/`tar` don't attach the `com.apple.quarantine` flag — only a
-browser download does — so the bug only shows up for real end users. See
-[INSTALLERS-PLAN.md](INSTALLERS-PLAN.md) for the full reasoning.
+The plugin bundles one per-OS native binary — the Go lens helper. On macOS that
+binary is the one thing that breaks a plain download: an **unsigned** binary that
+arrives **quarantined** (a browser download, then a Finder unzip) is blocked by
+Gatekeeper on first run. Local builds never hit this because `curl`/`tar` don't
+attach the `com.apple.quarantine` flag — only a browser download does — so the bug
+only shows up for real end users. See [INSTALLERS-PLAN.md](INSTALLERS-PLAN.md) for
+the full reasoning.
 
-[`scripts/sign-macos.sh`](../scripts/sign-macos.sh) fixes it at the source: it makes the
-bundled Node a **universal** binary (Intel + Apple Silicon in one), **codesigns** it with a
-Developer ID Application identity + hardened runtime, packages the three per-platform zips
-via [`scripts/package-zips.sh`](../scripts/package-zips.sh)
-(`SpeciesTagger-<version>-mac/-win/-all.zip` + `checksums.txt`), and **notarizes** the
-mac-containing ones (`-mac`, `-all`; the `-win` zip's `node.exe` is already
-Authenticode-signed). Nothing in the plugin's Lua changes — `resolveNode` still loads
-`node/darwin-arm64/node`, which is now universal.
+[`scripts/sign-macos.sh`](../scripts/sign-macos.sh) fixes it at the source: it
+verifies the bundled helper is **universal** (Intel + Apple Silicon in one — built
+by `make -C helper universal`), **codesigns** every Mach-O with a Developer ID
+Application identity + hardened runtime (no entitlements needed — Go doesn't JIT,
+unlike the old Node runtime), packages the three per-platform zips via
+[`scripts/package-zips.sh`](../scripts/package-zips.sh)
+(`SpeciesTagger-<version>-mac/-win/-all.zip` + `checksums.txt`), and **notarizes**
+the mac-containing ones (`-mac`, `-all`; the `-win` zip ships no Mach-O). Nothing
+in the plugin's Lua changes — `resolveHelper` loads
+`helper/darwin-universal/lens-helper`.
 
 ## One-time prerequisites (Apple Developer)
 
@@ -55,12 +58,14 @@ export NOTARY_PROFILE=notary
 ENV
 ```
 
-`--allow-unsigned` is the "do everything you can before the cert lands" mode: it fetches the
-x64 Node, lipos the universal binary, and repackages — so you can confirm the universal build
-runs on both architectures now. The zip it produces is **not** for distribution.
+`--allow-unsigned` is the "do everything you can before the cert lands" mode: it
+verifies the universal helper and repackages — so you can confirm the universal
+build runs on both architectures now. The zip it produces is **not** for
+distribution.
 
-Under the hood `release.sh` just chains the repo's existing pieces (`dev-setup.sh` → `npm ci`
-→ `build.sh` → `scripts/sign-macos.sh`); run those individually only for inner-loop debugging.
+Under the hood `release.sh` just chains the repo's existing pieces (`dev-setup.sh`
+→ `make -C helper universal` → `build.sh` → `scripts/sign-macos.sh`); run those
+individually only for inner-loop debugging.
 
 ## Why signing does NOT run in CI
 
@@ -68,7 +73,7 @@ Under the hood `release.sh` just chains the repo's existing pieces (`dev-setup.s
 Putting the Developer ID private key (as a `.p12`) and the notary API key into GitHub
 secrets would make GitHub a custodian of code-signing identity; a leak there would let
 anyone sign software as "Yuval Oren". So CI is **validation-only** — lint, tests, an
-unsigned bundle build with per-zip content checks, and the weekly Node-EOL guard — and the
+unsigned bundle build with per-zip content checks, and the weekly Go-EOL guard — and the
 signed release is produced and published locally by `./release.sh`. The env-var hooks that
 `sign-macos.sh` reads (`MACOS_CERT_P12_BASE64`, `NOTARY_KEY_P8_BASE64`, …) still exist for
 any future runner **you** control, but no GitHub-hosted workflow uses them.
@@ -76,9 +81,9 @@ any future runner **you** control, but no GitHub-hosted workflow uses them.
 ## Verifying a signed build
 
 ```bash
-codesign --verify --strict --verbose=2 output/dist/SpeciesTagger.lrplugin/node/darwin-arm64/node
-spctl --assess --type execute --verbose=4 output/dist/SpeciesTagger.lrplugin/node/darwin-arm64/node
-lipo -info output/dist/SpeciesTagger.lrplugin/node/darwin-arm64/node   # -> arm64 x86_64
+codesign --verify --strict --verbose=2 output/dist/SpeciesTagger.lrplugin/helper/darwin-universal/lens-helper
+spctl --assess --type execute --verbose=4 output/dist/SpeciesTagger.lrplugin/helper/darwin-universal/lens-helper
+lipo -info output/dist/SpeciesTagger.lrplugin/helper/darwin-universal/lens-helper   # -> x86_64 arm64
 xcrun notarytool history --key ... --key-id ... --issuer ...
 ```
 
@@ -89,7 +94,7 @@ quarantine flag on a built binary and run a tag:
 
 ```bash
 xattr -w com.apple.quarantine "0081;00000000;Safari;" \
-  output/dist/SpeciesTagger.lrplugin/node/darwin-arm64/node
+  output/dist/SpeciesTagger.lrplugin/helper/darwin-universal/lens-helper
 ```
 
 Or download the release zip through a browser and unzip it in Finder (double-click), which
@@ -100,8 +105,11 @@ notarized one is cleared by Gatekeeper's online check on first run.
 
 The Windows story is split in two:
 
-- **The zips need no signing** — the bundled `node.exe` from nodejs.org already carries
-  the OpenJS Foundation's Authenticode signature.
+- **The zips' `lens-helper.exe` is currently unsigned** — unlike the old bundled
+  `node.exe` (Authenticode-signed by the OpenJS Foundation), the Go helper is our
+  own binary. Until Azure Trusted Signing covers it too, expect the standard
+  unknown-publisher posture; `scripts/sign-win.sh` is the hook for signing BOTH
+  the installer and the helper exe once ATS is configured.
 - **`SpeciesTagger-win-setup.exe`** (the NSIS installer) is ours, so SmartScreen judges
   it by *our* signature. It is signed with **Azure Trusted Signing** by
   `scripts/sign-win.sh`, which release.sh calls automatically — from the Mac, no

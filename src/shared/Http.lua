@@ -48,12 +48,12 @@ end
 
 -- Google Lens has no anonymous API and its results are rendered by JavaScript,
 -- which LrHttp can't execute. So the Lens backend shells out (via LrTasks.execute)
--- to the bundled Node helper (scripts/lens/lens-search.js), which drives the user's
--- installed Chrome to render the results and prints one JSON line { ok, name }
--- (or { ok = false, cancelled|error }).
+-- to the bundled lens helper — a single static Go binary (helper/ in the repo) —
+-- which drives the user's installed Chrome to render the results and prints one
+-- JSON line { ok, name } (or { ok = false, cancelled|error }).
 -- Everything below is cross-platform: the command is built for the POSIX shell on
--- macOS/Linux and for cmd.exe on Windows (WIN_ENV). Node ships with the plugin (bundled
--- per-OS binary, preferred by resolveNode); the user supplies only Google Chrome.
+-- macOS/Linux and for cmd.exe on Windows (WIN_ENV). The helper ships with the
+-- plugin (per-OS binary under <plugin>/helper/); the user supplies only Chrome.
 
 -- rawget so these load headless (tests) where the Lightroom globals are absent.
 local function isWindows() return rawget( _G, 'WIN_ENV' ) == true end
@@ -70,47 +70,46 @@ end
 
 local function fileExists( p ) local f = p and io.open( p, 'rb' ); if f then f:close(); return true end return false end
 
--- Candidate paths for the Node runtime BUNDLED inside the plugin, most-preferred first.
--- The build vendors Node under <plugin>/node/<os-arch>/node[.exe] so recognition works
--- with only Chrome installed — nothing else for the user to set up. Pure (no I/O) for
--- testability. Lightroom's sandboxed Lua has no os.getenv / uname, so we can't read the
--- CPU arch here; instead we list the per-OS arch keys and let resolveNode take the first
--- that's actually present. Unambiguous as long as a bundle carries at most ONE arch per
--- OS (the norm — see build.lua's node_platforms; a fat multi-arch-per-OS bundle would
--- need a runtime arch probe).
-local function bundledNodeCandidates( isWin, pluginPath )
+-- Candidate paths for the lens helper BUNDLED inside the plugin, most-preferred
+-- first. The build puts it at <plugin>/helper/<key>/lens-helper[.exe] so
+-- recognition works with only Chrome installed. Pure (no I/O) for testability.
+-- Lightroom's sandboxed Lua has no os.getenv / uname, so we can't read the CPU
+-- arch here; resolveHelper takes the first candidate that's actually present.
+-- ORDER IS LOAD-BEARING on Windows: win-x64 first, because x64 runs everywhere
+-- (natively on x64, emulated on Windows-on-ARM) while arm64 runs ONLY on ARM —
+-- a bundle carrying both arches must never pick arm64 on an x64 machine. The
+-- NSIS installer installs just the native arch, so ARM installs still go
+-- native (no win-x64 on disk, the loop falls through to win-arm64).
+local function bundledHelperCandidates( isWin, pluginPath )
 	if not pluginPath or pluginPath == '' then return {} end
 	local sep = isWin and '\\' or '/'
-	local keys = isWin and { 'win-arm64', 'win-x64' }
-		or { 'darwin-arm64', 'darwin-x64' }
-	local binName = isWin and 'node.exe' or 'node'
+	local keys = isWin and { 'win-x64', 'win-arm64' }
+		or { 'darwin-universal', 'darwin-arm64', 'darwin-x64' }
+	local binName = isWin and 'lens-helper.exe' or 'lens-helper'
 	local out = {}
 	for _, key in ipairs( keys ) do
-		out[ #out + 1 ] = table.concat( { pluginPath, 'node', key, binName }, sep )
+		out[ #out + 1 ] = table.concat( { pluginPath, 'helper', key, binName }, sep )
 	end
 	return out
 end
 
--- Resolve `node` to a real path. Prefer the copy bundled in the plugin (above); then the
--- usual per-platform system install locations; then a bare "node" on PATH. Lightroom's
--- GUI gets a minimal PATH, so the explicit fixed paths come before the bare-name fallback
--- (the official Node MSI installs to Program Files and adds nodejs to PATH).
-local function resolveNode( isWin, pluginPath )
-	for _, p in ipairs( bundledNodeCandidates( isWin, pluginPath ) ) do
+-- Resolve the bundled helper to a real path. NO system fallback: the helper is
+-- the whole program, not a runtime — if it isn't in the bundle the install is
+-- broken, and runHelper turns the missing file into a "reinstall" message.
+-- Returns the preferred candidate even when absent so that message can name
+-- the path it looked for; nil only when there's no plugin path at all.
+local function resolveHelper( isWin, pluginPath )
+	local candidates = bundledHelperCandidates( isWin, pluginPath )
+	for _, p in ipairs( candidates ) do
 		if fileExists( p ) then return p end
 	end
-	local candidates = isWin
-		and { 'C:\\Program Files\\nodejs\\node.exe',
-			'C:\\Program Files (x86)\\nodejs\\node.exe' }
-		or { '/opt/homebrew/bin/node', '/usr/local/bin/node', '/usr/bin/node' }
-	for _, p in ipairs( candidates ) do if fileExists( p ) then return p end end
-	return 'node'
+	return candidates[ 1 ]
 end
 
 -- Run the bundled helper with `argv` (a list of already-decided string arguments)
 -- and `env` (ordered { name, value } pairs), capturing its single JSON stdout line.
 -- Returns the decoded table, or (nil, errString). Cross-platform (see above).
-local function runHelper( node, helper, argv, env, errFile )
+local function runHelper( helper, argv, env, errFile )
 	local LrTasks = import 'LrTasks'
 	local LrPathUtils = import 'LrPathUtils'
 	local LrFileUtils = import 'LrFileUtils'
@@ -118,7 +117,10 @@ local function runHelper( node, helper, argv, env, errFile )
 	local Log = require 'Log'
 	local isWin = isWindows()
 	local q = function( s ) return shQuote( s, isWin ) end
-	if not fileExists( helper ) then return nil, 'Lens helper not found at ' .. tostring( helper ) end
+	if not helper or not fileExists( helper ) then
+		return nil, 'Lens helper missing — reinstall Species Tagger (looked for ' ..
+			tostring( helper ) .. ')'
+	end
 
 	local tmpDir = LrPathUtils.getStandardFilePath( 'temp' )
 	local out = LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.json', os.time() ) )
@@ -127,7 +129,7 @@ local function runHelper( node, helper, argv, env, errFile )
 	-- instead of a bare "no output". Ignored on the happy path.
 	local ownErr = errFile == nil
 	local errPath = errFile or LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.err', os.time() ) )
-	local args = { q( node ), q( helper ) }
+	local args = { q( helper ) }
 	for _, a in ipairs( argv ) do args[ #args + 1 ] = a.raw and tostring( a.value ) or q( a.value ) end
 	local invocation = table.concat( args, ' ' ) .. ' > ' .. q( out ) .. ' 2> ' .. q( errPath )
 
@@ -204,11 +206,10 @@ end
 -- photos, a fresh tab each), shows an "m of n" counter (pos), and blocks until the user
 -- highlights a species and presses Tag — returning ONLY that string. The plugin never
 -- scrapes the page. close() shuts the reused window down cleanly at the end of a run (so
--- Chrome shows no "didn't shut down correctly" prompt). See scripts/lens/lens-search.js.
+-- Chrome shows no "didn't shut down correctly" prompt). See helper/ (the Go lens helper).
 function M.lensAssistAdapter( opts )
 	opts = opts or {}
-	local helper = opts.helperPath
-	local node = resolveNode( isWindows(), opts.pluginPath )
+	local helper = resolveHelper( isWindows(), opts.pluginPath )
 	local port = opts.tabsPort and tostring( opts.tabsPort ) or nil
 
 	return {
@@ -216,14 +217,14 @@ function M.lensAssistAdapter( opts )
 			local env = {}
 			if pos and pos ~= '' then env[ #env + 1 ] = { 'LENS_ASSIST_POS', pos } end
 			if port then env[ #env + 1 ] = { 'LENS_TABS_PORT', port } end
-			local d, err = runHelper( node, helper, { { value = imageFile } }, env )
+			local d, err = runHelper( helper, { { value = imageFile } }, env )
 			return interpretTagResult( d, err )
 		end,
 		-- Best-effort clean shutdown of the reused window; ignores errors (nothing to close).
 		close = function()
 			local env = { { 'LENS_ASSIST_CLOSE', '1' } }
 			if port then env[ #env + 1 ] = { 'LENS_TABS_PORT', port } end
-			runHelper( node, helper, { { value = 'close', raw = true } }, env )
+			runHelper( helper, { { value = 'close', raw = true } }, env )
 		end,
 	}
 end
@@ -232,8 +233,8 @@ end
 M._test = {
 	toLrHeaders = toLrHeaders,
 	shQuote = shQuote,
-	resolveNode = resolveNode,
-	bundledNodeCandidates = bundledNodeCandidates,
+	resolveHelper = resolveHelper,
+	bundledHelperCandidates = bundledHelperCandidates,
 	interpretTagResult = interpretTagResult,
 }
 
