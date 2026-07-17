@@ -13,6 +13,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"sync/atomic"
 
@@ -112,6 +113,7 @@ func (c *Client) readLoop() {
 			c.failAll(err)
 			return
 		}
+		trace("<-", data)
 		var env envelope
 		if json.Unmarshal(data, &env) != nil {
 			continue // not a frame we understand; never kill the loop over it
@@ -187,6 +189,7 @@ func (c *Client) Call(ctx context.Context, sessionID, method string, params, out
 	c.pending[id] = ch
 	c.mu.Unlock()
 
+	trace("->", frame)
 	if err := c.conn.Write(ctx, websocket.MessageText, frame); err != nil {
 		c.mu.Lock()
 		delete(c.pending, id)
@@ -226,3 +229,14 @@ func (c *Client) Subscribe(method, session string) *Sub {
 
 // ErrClosed reports whether err stems from the connection being closed.
 var ErrClosed = errors.New("cdp: closed")
+
+// trace dumps raw CDP frames to stderr when LENS_CDP_TRACE=1 — forensics for
+// environment-specific protocol hangs (e.g. the macos-latest CI runner).
+func trace(dir string, data []byte) {
+	if os.Getenv("LENS_CDP_TRACE") == "1" {
+		if len(data) > 2000 {
+			data = data[:2000]
+		}
+		fmt.Fprintf(os.Stderr, "CDP %s %s\n", dir, data)
+	}
+}
