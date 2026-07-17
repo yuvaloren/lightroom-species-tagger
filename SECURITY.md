@@ -24,7 +24,7 @@ release is supported — there are no long-lived maintenance branches.
 ## What this plugin does with your data and your machine
 
 Being explicit about the trust boundaries, since the interesting surface is not
-obvious from the outside (see also [docs/PRIVACY.md](docs/PRIVACY.md)):
+obvious from the outside (see also the Privacy section of the README):
 
 - **It uploads a downsized, freshly-rendered JPEG to Google Lens.** The re-render
   strips the original EXIF/GPS. Only the pixels go to Google; nothing else.
@@ -36,14 +36,14 @@ obvious from the outside (see also [docs/PRIVACY.md](docs/PRIVACY.md)):
   (`window.getSelection()`).
 - **It shells out to Node.js.** The Lua side builds the command from fixed arguments
   and the image path, shell-quoted per platform
-  ([`src/shared/Http.lua`](src/shared/Http.lua)). No user-typed text is passed to the
+  ([`src/plugin/shared/Http.lua`](src/plugin/shared/Http.lua)). No user-typed text is passed to the
   helper — you add keywords in Google's own search box, in the visible browser.
 - **Taxonomy lookups send only names** (never images or location) to the public
   GBIF API over HTTPS.
 - **No API keys or account credentials** are used or stored. There is no server
   component and no telemetry.
 - **Logs are redacted.** Anything that looks like a cookie or API key is masked
-  before it reaches the Lightroom plugin log ([`src/shared/Log.lua`](src/shared/Log.lua)).
+  before it reaches the Lightroom plugin log ([`src/plugin/shared/Log.lua`](src/plugin/shared/Log.lua)).
 
 ## Dependency & supply-chain notes
 

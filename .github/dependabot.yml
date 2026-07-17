@@ -7,7 +7,7 @@ updates:
   # (The go/toolchain PIN is invisible to Dependabot — that's what
   # .github/workflows/go-eol.yml is for.)
   - package-ecosystem: "gomod"
-    directory: "/helper"
+    directory: "/src/helper"
     schedule:
       interval: "monthly"
     open-pull-requests-limit: 5

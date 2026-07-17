@@ -1,7 +1,7 @@
 # ─────────────────────────────────────────────────────────────────────────────
 # Nothing generated or third-party is committed. Everything below is reproducible
 # from source (see the "Repository layout" section of README.md). If you're asking
-# "is all that code in output/ / node_modules ours?" — no: those are the trees here.
+# "is all that code in output/ ours?" — no: those are the trees here.
 # ─────────────────────────────────────────────────────────────────────────────
 
 # GENERATED — the ONE output tree. Removed by `just clean`. Holds:
@@ -9,24 +9,22 @@
 #   output/deps/  the one pulled Lua runtime dep (dkjson), fetched via LuaRocks
 /output/
 
-# THIRD-PARTY (pulled) — Node deps for the Google Lens browser helper (puppeteer-core),
-# installed with `npm ci` in scripts/lens. Pure JS; not ours. It can't live under
-# output/ because Node resolves modules next to package.json. (package-lock.json IS
-# committed, so installs are reproducible and CI can bundle it into the release.)
-/scripts/lens/node_modules/
+# GENERATED — the Go helper's cross-compiled binaries (build/build.lua, or
+# `just build`, produces these). Removed by `just clean`.
+/src/helper/dist/
 
-# TOOLCHAIN (pinned) — the isolated Lua 5.1 + LuaRocks env created by ./dev-setup.sh.
+# TOOLCHAIN (pinned) — the isolated Lua 5.1 + LuaRocks env created by `just setup`.
 # Not "output"; it's your installed dev env. `just clean-all` removes it.
 /.lua-env/
 
-# LOCAL signing config sourced by release.sh (Developer ID identity + notary profile refs).
+# LOCAL signing config sourced by build/release.sh (Developer ID identity + notary refs).
 # Never commit — it's per-machine and references your signing setup.
-/scripts/signing.env
+/build/signing.env
 
-# LOCAL ZXP signing material for the Adobe Exchange package (scripts/build-exchange.sh):
+# LOCAL ZXP signing material for the Adobe Exchange package (build/build-exchange.sh):
 # self-signed cert + its generated password. Reused across versions; never commit.
-/scripts/exchange-cert.p12
-/scripts/exchange-cert.pass
+/build/exchange-cert.p12
+/build/exchange-cert.pass
 
 # Test coverage artifacts.
 luacov.stats.out
@@ -37,16 +35,13 @@ luacov.report.out
 
 # ─────────────────────────────────────────────────────────────────────────────
 # Never-commit user data. The automated suite uses NO real photos: unit tests replay
-# the committed GBIF JSON in spec/fixtures/gbif/, and the Lens-helper integration test
-# generates a throwaway JPEG at run time. So no image belongs in the tree — this guard
-# keeps a stray photo (personal EXIF / GPS) from being committed by accident.
+# the committed GBIF JSON in test/plugin/fixtures/gbif/, and the Go helper integration
+# test generates a throwaway JPEG at run time. So no image belongs in the tree — this
+# guard keeps a stray photo (personal EXIF / GPS) from being committed by accident.
 # ─────────────────────────────────────────────────────────────────────────────
-spec/**/*.jpg
-spec/**/*.jpeg
-spec/**/*.png
+test/**/*.jpg
+test/**/*.jpeg
+test/**/*.png
 
 # macOS
 .DS_Store
-
-# Go helper build output (make -C helper build/universal)
-helper/dist/

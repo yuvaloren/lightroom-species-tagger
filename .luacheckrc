@@ -5,8 +5,8 @@
 -- allowlist here — that keeps the static-analysis surface honest.
 std = 'lua51'
 
--- Lightroom plugin runtime globals (only the .lrplugin/*.lua glue touches these;
--- the pure modules in src/shared/ never call `import` — they take injected deps).
+-- Lightroom plugin runtime globals (only the src/plugin/*.lua glue touches these;
+-- the pure modules in src/plugin/shared/ never call `import` — they take injected deps).
 read_globals = {
 	'import',   -- LR namespace loader
 	'LOC',      -- localization helper
@@ -24,12 +24,12 @@ ignore = {
 max_line_length = false
 
 -- The test suite uses the busted DSL (describe/it/assert/...).
-files['spec'] = {
+files['test/plugin'] = {
 	std = '+busted',
 	read_globals = { 'import', '_PLUGIN' },
 }
 
--- Helper scripts are run with the pinned standalone Lua (have arg/io/os).
-files['scripts'] = {
+-- The build composer runs with the pinned standalone Lua (has arg/io/os).
+files['build'] = {
 	globals = { 'arg' },
 }

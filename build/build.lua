@@ -39,15 +39,15 @@ local PLUGINS = { 'SpeciesTagger' }
 -- of truth); pulled via LuaRocks at build time and bundled into the .lrplugin.
 local DKJSON_VERSION = '2.10'
 
--- The Go lens helper, cross-compiled by `make -C helper universal` into
--- helper/dist/ and copied into the bundle at <plugin>/helper/<key>/
+-- The Go lens helper. This build cross-compiles it (see build_helper) into
+-- src/helper/dist/ and copies it into the bundle at <plugin>/helper/<key>/
 -- lens-helper[.exe] — one static binary per platform; the user supplies only
--- Google Chrome. The Go toolchain pin lives in helper/go.mod, guarded weekly
--- by scripts/check-go-eol.sh (a custom pin Dependabot cannot see).
--- A bundle may carry BOTH Windows arches: resolveHelper (src/shared/Http.lua)
--- prefers win-x64, which runs everywhere (natively on x64, emulated on
--- Windows-on-ARM), and the NSIS installer installs only the machine's native
--- one so ARM installs get the arm64 build.
+-- Google Chrome. The Go toolchain pin lives in src/helper/go.mod, guarded
+-- weekly by build/check-go-eol.sh (a custom pin Dependabot cannot see).
+-- A bundle may carry BOTH Windows arches: resolveHelper (src/plugin/shared/
+-- Http.lua) prefers win-x64, which runs everywhere (natively on x64, emulated
+-- on Windows-on-ARM), and the NSIS installer installs only the machine's
+-- native one so ARM installs get the arm64 build.
 local HELPER_PLATFORMS = {
 	[ 'darwin-universal' ] = { src = 'darwin-universal/lens-helper',  bin = 'lens-helper' },
 	[ 'darwin-arm64' ]     = { src = 'darwin/arm64/lens-helper',      bin = 'lens-helper' },
@@ -71,6 +71,7 @@ end
 local SCRIPT = abspath( arg[ 0 ] )
 local ROOT = dirname( dirname( SCRIPT ) ) -- build/build.lua -> repo root
 local SRC = ROOT .. '/src'
+local HELPER_DIR = SRC .. '/helper' -- the Go lens helper module
 -- Everything this build generates lives under one gitignored top-level tree,
 -- `output/` (removed by `just clean`): the composed bundle + zips in output/dist,
 -- and the pulled Lua dependency (dkjson) cached in output/deps.
@@ -161,7 +162,7 @@ local function ensure_dkjson( force )
 		return cached
 	end
 	if not have_tool( 'luarocks' ) then
-		die( 'luarocks is required to fetch dkjson — run ./dev-setup.sh (or `just setup`)' )
+		die( 'luarocks is required to fetch dkjson — run `just setup`' )
 	end
 	mkdirp( DEPS )
 	local tree = DEPS .. '/_rocks'
@@ -315,7 +316,7 @@ local function do_install()
 	log( 'In Lightroom Classic — File \226\150\184 Plug-in Manager:' )
 	log( '  \226\128\162 First time:  click "Add" and select the folder' )
 	for _, p in ipairs( installed ) do log( '        ' .. p ) end
-	log( '  \226\128\162 After re-running ./install.sh to update: select "Species Tagger"' )
+	log( '  \226\128\162 After re-running `just install` to update: select "Species Tagger"' )
 	log( '        and click "Reload Plug-in" (or just relaunch Lightroom Classic).' )
 	log( '' )
 	log( 'Then run it from  Library \226\150\184 Plug-in Extras \226\150\184 Identify and Tag Species.' )
@@ -330,6 +331,55 @@ local function do_uninstall()
 			log( 'removed ' .. dest .. ' (also remove it from Plug-in Manager if it was Added)' )
 		end
 	end
+end
+
+--------------------------------------------------------------------------------
+-- Go lens helper: cross-compile every shipped target + the universal mac
+-- binary, into src/helper/dist/. Folded in from the old helper/Makefile so the
+-- whole build is ONE command (`just build`) — no separate `make` step to
+-- remember or forget. No UPX (it can't pack Mach-O or win-arm64, and trips AV
+-- on the one exe it could): stripped Go is already ~6 MB vs the ~200 MB Node
+-- runtime this replaced. `lipo` on macOS, `llvm-lipo` elsewhere (CI installs
+-- llvm). CGO off so every target is a static cross-compile with no C toolchain.
+
+local function build_helper()
+	local targets = { 'darwin/arm64', 'darwin/amd64', 'windows/amd64', 'windows/arm64' }
+	if not have_tool( 'go' ) then
+		die( 'go is required to build the lens helper — install Go (brew install go), then re-run' )
+	end
+	for _, t in ipairs( targets ) do
+		local goos, goarch = t:match( '^(%w+)/(%w+)$' )
+		local ext = ( goos == 'windows' ) and '.exe' or ''
+		local out = HELPER_DIR .. '/dist/' .. t .. '/lens-helper' .. ext
+		mkdirp( dirname( out ) )
+		run( string.format(
+			'cd %q && GOOS=%s GOARCH=%s CGO_ENABLED=0 go build -trimpath -ldflags=%q -o %q .',
+			HELPER_DIR, goos, goarch, '-s -w', out ) )
+		log( 'built helper ' .. t )
+	end
+	-- universal2 mac binary via lipo / llvm-lipo (llvm-lipo-NN on Debian/CI).
+	local lipo
+	for _, cand in ipairs( { 'lipo', 'llvm-lipo' } ) do
+		if have_tool( cand ) then lipo = cand break end
+	end
+	if not lipo then
+		local h = io.popen( 'ls /usr/bin/llvm-lipo-* 2>/dev/null | head -1' )
+		local found = h:read( '*a' ):gsub( '%s+', '' )
+		h:close()
+		if found ~= '' then lipo = found end
+	end
+	if not lipo then
+		die( 'need lipo or llvm-lipo to build the universal mac helper (apt install llvm)' )
+	end
+	local uni = HELPER_DIR .. '/dist/darwin-universal/lens-helper'
+	mkdirp( dirname( uni ) )
+	run( string.format( '%s -create %q %q -output %q',
+		lipo,
+		HELPER_DIR .. '/dist/darwin/arm64/lens-helper',
+		HELPER_DIR .. '/dist/darwin/amd64/lens-helper',
+		uni ) )
+	run( string.format( 'chmod +x %q', uni ) )
+	log( 'built helper darwin-universal (arm64 + x86_64)' )
 end
 
 --------------------------------------------------------------------------------
@@ -356,15 +406,21 @@ local function compose( label )
 	local build = tonumber( os.getenv( 'GITHUB_RUN_NUMBER' ) ) or 0
 	local dkjson = ensure_dkjson()
 
+	-- Cross-compile the Go lens helper first so the bundle is self-contained
+	-- from a clean checkout with no separate step (one-command build).
+	build_helper()
+
 	rmtree( DIST )
 	mkdirp( DIST )
 
 	for _, plugin in ipairs( PLUGINS ) do
-		local srcdir = SRC .. '/' .. plugin .. '.lrplugin'
+		-- Source lives in src/plugin/ (LR-SDK files) + src/plugin/shared/ (pure
+		-- modules, flattened in); the shipped bundle is always <plugin>.lrplugin.
+		local srcdir = SRC .. '/plugin'
 		local outdir = DIST .. '/' .. plugin .. '.lrplugin'
 		mkdirp( outdir )
 
-		-- plugin-specific files (allowlist: skip dotfiles like .DS_Store)
+		-- plugin-specific files (allowlist: files only, skip dotfiles + subdirs)
 		for entry in lfs.dir( srcdir ) do
 			if entry:sub( 1, 1 ) ~= '.'
 				and lfs.attributes( srcdir .. '/' .. entry, 'mode' ) == 'file' then
@@ -373,7 +429,7 @@ local function compose( label )
 		end
 
 		-- shared modules, copied flat into the bundle
-		local shared = SRC .. '/shared'
+		local shared = srcdir .. '/shared'
 		for entry in lfs.dir( shared ) do
 			if entry:match( '%.lua$' ) then
 				copy_file( shared .. '/' .. entry, outdir .. '/' .. entry )
@@ -385,13 +441,12 @@ local function compose( label )
 
 		-- The Go lens helper, so recognition needs nothing but Chrome installed.
 		-- Copied to <plugin>/helper/<key>/lens-helper[.exe]; resolveHelper
-		-- (src/shared/Http.lua) picks the bundled binary by existence.
+		-- (src/plugin/shared/Http.lua) picks the bundled binary by existence.
 		for _, key in ipairs( helper_platforms() ) do
 			local spec = HELPER_PLATFORMS[ key ]
-			local src = ROOT .. '/helper/dist/' .. spec.src
+			local src = HELPER_DIR .. '/dist/' .. spec.src
 			if not exists( src ) then
-				die( 'helper binary missing: ' .. src ..
-					' — build it first: make -C helper universal' )
+				die( 'helper binary missing after build: ' .. src )
 			end
 			local helperDir = outdir .. '/helper/' .. key
 			mkdirp( helperDir )
@@ -412,10 +467,10 @@ end
 
 local function package_zips( label )
 	-- ALL zip packaging (the three per-platform zips — SpeciesTagger-<ver>-mac/-win/
-	-- -all.zip — plus checksums.txt) lives in ONE place, scripts/package-zips.sh,
-	-- shared with the signed-release path (scripts/sign-macos.sh) so the dev/CI zips
+	-- -all.zip — plus checksums.txt) lives in ONE place, build/package-zips.sh,
+	-- shared with the signed-release path (build/sign-macos.sh) so the dev/CI zips
 	-- and the release zips can never drift.
-	run( string.format( 'bash %q %q', ROOT .. '/scripts/package-zips.sh', label ) )
+	run( string.format( 'bash %q %q', ROOT .. '/build/package-zips.sh', label ) )
 end
 
 --------------------------------------------------------------------------------

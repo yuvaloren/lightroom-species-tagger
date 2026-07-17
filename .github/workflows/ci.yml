@@ -8,9 +8,9 @@ on:
   workflow_dispatch:
 
 # CI is validation-only: it never signs and never publishes. Releases are cut
-# locally by ./release.sh (sign + notarize + package + gh release create) so the
-# signing identity and notary credentials never live in GitHub secrets — see
-# docs/SIGNING.md. Nothing here needs write access.
+# locally by `just release` (sign + notarize + package + gh release create) so the
+# signing identity and notary credentials never live in GitHub secrets. Nothing
+# here needs write access.
 permissions:
   contents: read
 
@@ -32,14 +32,14 @@ jobs:
       - name: Install Lua tooling
         # luacheck is pinned because the gate is "0 warnings" — a new luacheck
         # release could otherwise flip a green PR red with no source change. Keep
-        # this in lock-step with dev-setup.sh and the justfile `deps` recipe.
+        # this in lock-step with build/setup.sh and the justfile `deps` recipe.
         run: luarocks install luacheck 1.2.0 && luarocks install busted && luarocks install luacov && luarocks install luafilesystem
 
       - name: Fetch dependencies (pulls the pinned dkjson)
         run: lua build/build.lua --fetch-deps
 
       - name: Lint
-        run: luacheck src spec scripts
+        run: luacheck src test build
 
       - name: Test
         run: busted
@@ -54,21 +54,19 @@ jobs:
       # ── the Go lens helper: gofmt + vet + unit tests + all four binaries ──
       - uses: actions/setup-go@v6
         with:
-          go-version-file: helper/go.mod
-          cache-dependency-path: helper/go.sum
+          go-version-file: src/helper/go.mod
+          cache-dependency-path: src/helper/go.sum
 
       - name: Helper gofmt + vet + unit tests (race detector on)
-        working-directory: helper
+        working-directory: src/helper
         run: |
           test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::gofmt"; exit 1; }
           go vet ./...
           go vet -tags integration ./...
           go test -race ./...
 
-      - name: Cross-compile the helper (all targets + universal mac binary)
-        run: |
-          sudo apt-get -yq install llvm >/dev/null # llvm-lipo for the universal binary
-          make -C helper universal
+      - name: Install llvm (llvm-lipo) — build.lua lipos the universal mac helper
+        run: sudo apt-get -yq install llvm >/dev/null
 
       - name: Version drift guard (tags only)
         if: startsWith(github.ref, 'refs/tags/v')
@@ -113,6 +111,16 @@ jobs:
           for gone in node lens overlay-inject.js; do
             test ! -e "$B/$gone" || { echo "::error::$B/$gone is the Node era — it must not ship"; exit 1; }
           done
+          # No TEST code in the shipped artifact — the bundle is production Lua +
+          # the compiled Go binary + dkjson, nothing else. Go excludes _test.go
+          # by construction, and build.lua copies only production files; this
+          # asserts that invariant so a stray spec/fixture/testdata can never ship.
+          if find "$B" \( -name '*_test*' -o -name '*_spec*' -o -name '*.go' \
+               -o -path '*/testdata/*' -o -path '*/fixtures/*' \) | grep -q .; then
+            echo "::error::test code leaked into the bundle:"; \
+            find "$B" \( -name '*_test*' -o -name '*_spec*' -o -name '*.go' -o -path '*/testdata/*' -o -path '*/fixtures/*' \)
+            exit 1
+          fi
           while IFS= read -r bin; do
             sz=$(wc -c < "$bin")
             budget=$((8*1024*1024))
@@ -147,11 +155,11 @@ jobs:
         # not here; its script still gets a syntax pass.
         run: |
           set -euo pipefail
-          for s in scripts/build-pkg.sh scripts/build-win-installer.sh scripts/sign-win.sh scripts/sync-wiki.sh scripts/check-go-eol.sh; do
+          for s in build/build-pkg.sh build/build-win-installer.sh build/sign-win.sh build/sync-wiki.sh build/check-go-eol.sh; do
             bash -n "$s"
           done
           sudo apt-get -yq install nsis >/dev/null
-          bash scripts/build-win-installer.sh
+          bash build/build-win-installer.sh
           test -f output/dist/SpeciesTagger-win-setup.exe
           # wiki extraction: every generated page must be non-empty (guards
           # against a README heading rename silently emptying a wiki page)
@@ -198,12 +206,12 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
-          go-version-file: helper/go.mod
-          cache-dependency-path: helper/go.sum
+          go-version-file: src/helper/go.mod
+          cache-dependency-path: src/helper/go.sum
       - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         id: setup-chrome
       - name: Integration suite (scenarios, upload path, lifecycle, trusted click)
-        working-directory: helper
+        working-directory: src/helper
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
         # -timeout 300s so a genuinely hung browser fails the leg in minutes,
@@ -221,10 +229,10 @@ jobs:
       - uses: actions/checkout@v7
       - uses: actions/setup-go@v6
         with:
-          go-version-file: helper/go.mod
-          cache-dependency-path: helper/go.sum
+          go-version-file: src/helper/go.mod
+          cache-dependency-path: src/helper/go.sum
       - name: Unit tests + vet (darwin) — incl. the integration build tag compiling
-        working-directory: helper
+        working-directory: src/helper
         run: |
           test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::gofmt"; exit 1; }
           go vet ./...

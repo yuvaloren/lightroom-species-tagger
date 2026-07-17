@@ -4,7 +4,7 @@ contact_links:
     url: https://github.com/yuvaloren/lightroom-species-tagger/discussions
     about: Ask in Discussions — for how-to questions and setup help (not bugs).
   - name: Troubleshooting guide
-    url: https://github.com/yuvaloren/lightroom-species-tagger/blob/main/docs/TROUBLESHOOTING.md
+    url: https://github.com/yuvaloren/lightroom-species-tagger/blob/main/the Troubleshooting page on the wiki
     about: Google challenges, "no output", Node not found, and other common snags.
   - name: Security vulnerability
     url: https://github.com/yuvaloren/lightroom-species-tagger/security/advisories/new
