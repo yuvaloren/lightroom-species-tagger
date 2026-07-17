@@ -223,6 +223,24 @@ func portAnswers(port int) bool {
 	return true
 }
 
+// waitTrue polls a JS boolean expression until it evaluates truthy, or the
+// context deadline hits — a deterministic wait-for-condition (not a fixed
+// sleep) for page state that can lag on a slow runner.
+func waitTrue(t *testing.T, ctx context.Context, client *cdp.Client, session, expr string) {
+	t.Helper()
+	deadline := time.Now().Add(20 * time.Second)
+	for time.Now().Before(deadline) {
+		ectx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		obj, err := client.Evaluate(ectx, session, expr, true)
+		cancel()
+		if err == nil && obj != nil && string(obj.Value) == "true" {
+			return
+		}
+		time.Sleep(100 * time.Millisecond)
+	}
+	t.Fatalf("condition never became true: %s", expr)
+}
+
 // newCacheDir hands each test an isolated LENS_CACHE_DIR and tears it down
 // SAFELY: close the window, wait for the port to go dark, give Chrome a beat
 // to finish flushing the profile, then best-effort remove. t.TempDir()'s
@@ -493,11 +511,14 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 		"data:text/html,<h2 id=sp>"+name+"</h2><p>some other, unrelated body text</p>"); err != nil {
 		t.Fatal(err)
 	}
-	time.Sleep(500 * time.Millisecond)
-	// Inject the REAL embedded overlay (the same bytes the helper ships).
+	// Wait deterministically for document.body (data: nav can lag on a slow
+	// runner), then inject the REAL embedded overlay (the bytes the helper
+	// ships), then wait for its button to exist — no fixed sleep to race.
+	waitTrue(t, cctx, client, session, "!!document.body")
 	if _, err := client.Evaluate(cctx, session, overlaySource(""), true); err != nil {
 		t.Fatal(err)
 	}
+	waitTrue(t, cctx, client, session, "!!document.getElementById('__lens_tag')")
 
 	// 1. mechanism: the Tag button cancels its mousedown default.
 	obj, err := client.Evaluate(cctx, session, `(function(){
