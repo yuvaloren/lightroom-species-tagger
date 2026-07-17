@@ -236,13 +236,26 @@ func newCacheDir(t *testing.T, port int) string {
 	}
 	t.Cleanup(func() {
 		closeWindow(t, port, dir)
-		for i := 0; i < 20 && portAnswers(port); i++ {
-			time.Sleep(250 * time.Millisecond)
-		}
-		time.Sleep(500 * time.Millisecond)
-		_ = os.RemoveAll(dir)
+		removeProfileDir(dir)
 	})
 	return dir
+}
+
+// removeProfileDir deletes a Chrome profile dir WITHOUT racing Chrome's async
+// shutdown flush — no sleep-and-hope. On Unix an atomic rename retires the live
+// dir in a single syscall (it can't race a concurrent writer and never rmdirs a
+// dir still being written into — the no-race rule), then the moved copy is
+// deleted best-effort. On Windows an open handle makes both rename and delete
+// fail, and the CI runner is ephemeral, so we don't fight the OS — the temp dir
+// goes with the runner.
+func removeProfileDir(dir string) {
+	if runtime.GOOS == "windows" {
+		return
+	}
+	trash := dir + ".trash"
+	if os.Rename(dir, trash) == nil {
+		_ = os.RemoveAll(trash)
+	}
 }
 
 func tmpImage(t *testing.T, content string) string {

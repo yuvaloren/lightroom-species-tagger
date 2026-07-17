@@ -42,13 +42,17 @@ func TestLiveSmoke(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	// Cleanup mirrors the integration harness: close, wait, best-effort remove.
+	// Cleanup: close the window, then retire the profile dir race-free — an
+	// atomic rename (one syscall, can't race Chrome's async flush, never rmdirs
+	// a live dir) then a best-effort delete of the moved copy. No sleep.
 	t.Cleanup(func() {
 		cmd := exec.Command(bin, "x")
 		cmd.Env = append(os.Environ(), "LENS_ASSIST_CLOSE=1", "LENS_TABS_PORT=9481", "LENS_CACHE_DIR="+cache)
 		_ = cmd.Run()
-		time.Sleep(2 * time.Second)
-		_ = os.RemoveAll(cache)
+		trash := cache + ".trash"
+		if os.Rename(cache, trash) == nil {
+			_ = os.RemoveAll(trash)
+		}
 	})
 
 	// The stand-in human: as soon as the helper's Chrome shows a Lens results
