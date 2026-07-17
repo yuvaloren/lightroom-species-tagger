@@ -170,21 +170,26 @@ jobs:
             output/dist/*.exe
             output/dist/checksums.txt
 
-  # ── Drive the REAL helper binary on every OS users run (fake Google, no
-  #    network). This matrix is the migration's load-bearing coverage: the
-  #    helper has per-OS build-tagged code (detached spawn, Chrome discovery,
-  #    version detection) that a single-OS CI cannot execute. ────────────────
+  # ── Drive the REAL helper binary against a fake Google (no network) on the
+  #    OSes where Chrome's renderer runs reliably. The helper has per-OS
+  #    build-tagged code (detached spawn, Chrome discovery, version detection);
+  #    Linux and Windows exercise it end-to-end here.
+  #
+  #    macOS is deliberately NOT in this matrix. On GitHub-hosted macOS runners
+  #    (verified on both macos-15 and the macos-26 image) Chrome's renderer
+  #    process will not run in the runner's session: Target.createTarget /
+  #    attachToTarget succeed, but the first renderer-level call (Page.enable)
+  #    never responds — headless additionally crashes the renderer outright.
+  #    Real Macs pass (the parity gate and the release E2E both run the full
+  #    suite on a real Mac), so this is a CI-sandbox limitation, not a helper
+  #    bug; it's the same reason Playwright/Puppeteer ship their own Chromium.
+  #    The macos-unit job below still compiles and runs the darwin build-tagged
+  #    code natively, and macOS integration is covered by the manual Mac E2E.
   helper-integration:
     strategy:
       fail-fast: false
       matrix:
-        # macos-15, NOT macos-latest: as of 2026-07 macos-latest rolled to the
-        # macos-26-arm64 image, where Chrome-for-Testing's CDP is broken — a
-        # page attaches but Page.enable never responds (headless additionally
-        # crashes the renderer). Real Macs, ubuntu, and windows all pass; it's
-        # specific to that brand-new OS image. Pin to the previous stable macOS,
-        # which is also closer to what users actually run.
-        os: [ ubuntu-latest, macos-15, windows-latest ]
+        os: [ ubuntu-latest, windows-latest ]
     runs-on: ${{ matrix.os }}
     defaults:
       run:
@@ -202,6 +207,26 @@ jobs:
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
         # -timeout 300s so a genuinely hung browser fails the leg in minutes,
-        # not at go test's 10-minute default (learned diagnosing the macos-26
-        # image — a hang shouldn't cost 10 min of runner time).
+        # not at go test's 10-minute default.
         run: go test -tags integration -race -count=1 -timeout 300s -v ./lens/
+
+  # ── The darwin build-tagged code (spawn_darwin, Chrome discovery, profile
+  #    paths) compiled and unit-tested NATIVELY on macOS — the coverage the
+  #    integration matrix can't give here (see helper-integration). No Chrome:
+  #    these tests don't launch a browser, so the renderer limitation above
+  #    doesn't apply.
+  macos-unit:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-go@v6
+        with:
+          go-version-file: helper/go.mod
+          cache-dependency-path: helper/go.sum
+      - name: Unit tests + vet (darwin) — incl. the integration build tag compiling
+        working-directory: helper
+        run: |
+          test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::gofmt"; exit 1; }
+          go vet ./...
+          go vet -tags integration ./...
+          go test -race ./...
