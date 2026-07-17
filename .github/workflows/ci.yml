@@ -191,7 +191,21 @@ jobs:
           cache-dependency-path: helper/go.sum
       - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         id: setup-chrome
+      # macOS-latest headless Chrome 151 crashes the renderer on graphics init
+      # regardless of GPU flags, so that leg runs HEADED (the production path;
+      # macOS runners have a WindowServer). TEMP: trace + scenario A only while
+      # confirming headed works, then this special-case expands to the full -v
+      # suite and the trace comes back off.
+      - name: Integration suite (macOS, headed)
+        if: runner.os == 'macOS'
+        working-directory: helper
+        env:
+          LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
+          LENS_TEST_HEADED: "1"
+          LENS_CDP_TRACE: "1"
+        run: go test -tags integration -count=1 -timeout 300s -v -run 'TestScenarios/A_' ./lens/
       - name: Integration suite (scenarios, upload path, lifecycle, trusted click)
+        if: runner.os != 'macOS'
         working-directory: helper
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
