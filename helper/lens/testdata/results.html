@@ -1,0 +1,46 @@
+<!doctype html>
+<html>
+<head><meta charset="utf-8"><title>Giant frogfish — Google Lens</title></head>
+<body>
+  <nav>
+    <a href="#">All</a> <a href="#">Images</a> <a href="#">Videos</a> <a href="#">News</a>
+    <a href="#">Maps</a> <a href="#">Books</a> <a href="#">Sign in</a> <a href="#">Settings</a>
+  </nav>
+
+  <section>
+    <h2>AI Overview</h2>
+    <p>This is a Giant frogfish (Antennarius commerson), a species of anglerfish in the
+       family Antennariidae found on coral reefs across the Indo-Pacific.</p>
+  </section>
+
+  <section>
+    <h2>Visual matches</h2>
+    <ul>
+      <li><a href="#">Giant frogfish (Antennarius commerson)</a></li>
+      <li><a href="#">Painted frogfish (Antennarius pictus)</a></li>
+      <li><a href="#">Warty frogfish (Antennarius maculatus)</a></li>
+      <li><a href="#">Striated frogfish (Antennarius striatus)</a></li>
+      <li><a href="#">Hairy frogfish (Antennarius hispidus)</a></li>
+      <li><a href="#">Randall's frogfish (Antennarius randalli)</a></li>
+    </ul>
+  </section>
+
+  <section>
+    <h2>Related searches</h2>
+    <ul>
+      <li><a href="#">Mustela subpalmata (Egyptian weasel)</a></li>
+      <li><a href="#">Frogfish aquarium care</a></li>
+    </ul>
+  </section>
+
+  <!-- Off-page targets the integration test selects by id via Range.selectNodeContents.
+       Each is on its own line with no inner indentation so the selection is the exact
+       string. Kept in the render tree (off to the left) so getSelection() works —
+       display:none would make the selection empty. Not part of a real Lens page. -->
+  <section id="__test_targets" style="position:absolute;left:-9999px;top:0">
+    <div id="__t_common">Giant frogfish</div>
+    <div id="__t_combined">Giant frogfish (Antennarius commerson)</div>
+    <div id="__t_curly">“Randall’s frogfish”</div>
+  </section>
+</body>
+</html>
