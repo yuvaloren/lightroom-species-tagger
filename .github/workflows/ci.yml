@@ -195,4 +195,7 @@ jobs:
         working-directory: helper
         env:
           LENS_CHROME: ${{ steps.setup-chrome.outputs.chrome-path }}
-        run: go test -tags integration -race -count=1 -v ./lens/
+        # -timeout 300s so a genuinely hung browser fails the leg in minutes,
+        # not at go test's 10-minute default (learned diagnosing the macos
+        # renderer crash — a hang shouldn't cost 10 min of runner time).
+        run: go test -tags integration -race -count=1 -timeout 300s -v ./lens/
