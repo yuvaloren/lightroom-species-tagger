@@ -70,6 +70,15 @@ jobs:
           go run honnef.co/go/tools/cmd/staticcheck@2026.1 -tags integration ./...
           go test -race ./...
 
+      - name: Burst clustering accuracy (labelled-corpus gate)
+        # The REAL helper (hash mode) + the REAL Burst.lua over real, labelled
+        # burst sequences. Hard gate: zero false merges (a merge silently
+        # mis-tags photos); false splits are budgeted at 10%.
+        run: |
+          mkdir -p output/accuracy
+          ( cd src/helper && go build -o ../../output/accuracy/lens-helper . )
+          lua build/burst-accuracy.lua --helper output/accuracy/lens-helper
+
       - name: Shellcheck the build scripts
         run: |
           sudo apt-get -yq install shellcheck >/dev/null

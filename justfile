@@ -84,8 +84,19 @@ uninstall:
 changelog:
     git cliff --output CHANGELOG.md
 
-# full local gate before pushing: lint + tests + build
-check: lint test build
+# offline clustering-accuracy gate for burst detection: the REAL helper (hash
+# mode) + the REAL Burst.lua over the labelled corpus in
+# test/plugin/fixtures/burst-corpus. `just burst-accuracy --sweep` prints the
+# threshold-tuning table HAMMING_THRESHOLD was chosen from.
+burst-accuracy *ARGS: _deps
+    #!/usr/bin/env bash
+    set -euo pipefail
+    mkdir -p output/accuracy
+    ( cd src/helper && go build -o ../../output/accuracy/lens-helper . )
+    lua build/burst-accuracy.lua --helper output/accuracy/lens-helper {{ARGS}}
+
+# full local gate before pushing: lint + tests + corpus accuracy + build
+check: lint test burst-accuracy build
 
 # Remove EVERYTHING generated — the output/ tree (bundle + pulled deps), the Go
 # helper's cross-compiled binaries, and coverage artifacts.
