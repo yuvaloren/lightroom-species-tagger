@@ -105,7 +105,7 @@ func Run(cfg Config) Result {
 	// Close command: connect to the reuse window and shut it down cleanly.
 	if cfg.Close {
 		if client, _ := connect(ctx, cfg.TabsPort); client != nil {
-			cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 			_ = client.BrowserClose(cctx)
 			cancel()
 			client.Close()
@@ -123,7 +123,7 @@ func Run(cfg Config) Result {
 	}
 	defer client.Close() // disconnect only — never kills the reused window
 
-	session, err := newPage(ctx, client)
+	session, err := newPage(ctx, client, cfg)
 	if err != nil {
 		return fail("assist failed: " + err.Error())
 	}
@@ -157,7 +157,7 @@ func fileExists(p string) bool {
 
 // connect tries the browser endpoint on port; nil client when nothing answers.
 func connect(ctx context.Context, port int) (*cdp.Client, error) {
-	hctx, cancel := context.WithTimeout(ctx, 2*time.Second)
+	hctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	req, _ := http.NewRequestWithContext(hctx, "GET",
 		fmt.Sprintf("http://127.0.0.1:%d/json/version", port), nil)
@@ -172,7 +172,7 @@ func connect(ctx context.Context, port int) (*cdp.Client, error) {
 	if err := json.NewDecoder(resp.Body).Decode(&v); err != nil || v.WebSocketDebuggerURL == "" {
 		return nil, fmt.Errorf("no webSocketDebuggerUrl on port %d", port)
 	}
-	dctx, dcancel := context.WithTimeout(ctx, 5*time.Second)
+	dctx, dcancel := context.WithTimeout(ctx, 15*time.Second)
 	defer dcancel()
 	return cdp.Dial(dctx, v.WebSocketDebuggerURL)
 }
@@ -213,17 +213,22 @@ func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
 // newPage opens a fresh tab for this photo and closes the others, so there is
 // a single visible tab and the overlay's addScriptToEvaluateOnNewDocument
 // can't accumulate across photos.
-func newPage(ctx context.Context, client *cdp.Client) (string, error) {
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+func newPage(ctx context.Context, client *cdp.Client, cfg Config) (string, error) {
+	// Generous budget: this guards against a hung browser, not slowness —
+	// puppeteer's default protocol timeout was 180 s, and CI's shared mac
+	// runners have shown 15 s to be too tight for real page creation.
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	targetID, err := client.CreateTarget(cctx, "about:blank")
 	if err != nil {
 		return "", err
 	}
+	cfg.dbg("created target:", targetID)
 	session, err := client.AttachToTarget(cctx, targetID)
 	if err != nil {
 		return "", err
 	}
+	cfg.dbg("attached session:", session)
 	if err := client.EnablePageRuntime(cctx, session); err != nil {
 		return "", err
 	}
@@ -239,7 +244,7 @@ func newPage(ctx context.Context, client *cdp.Client) (string, error) {
 }
 
 func prepPage(ctx context.Context, client *cdp.Client, session string, cfg Config) error {
-	cctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	ver := chrome.DetectVersion(chrome.Find())
 	ua, md := UserAgentFor(goos(), goarch(), ver)
@@ -272,7 +277,7 @@ func overlaySource(pos string) string {
 func goTo(ctx context.Context, client *cdp.Client, session, url string, timeout time.Duration) {
 	sub := client.Subscribe("Page.domContentEventFired", session)
 	defer sub.Close()
-	nctx, cancel := context.WithTimeout(ctx, 15*time.Second)
+	nctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	err := client.Navigate(nctx, session, url)
 	cancel()
 	if err != nil {
@@ -309,7 +314,7 @@ func uploadInBrowser(ctx context.Context, client *cdp.Client, session string, cf
 	}
 	goTo(ctx, client, session, warm, 45*time.Second)
 
-	cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	action := "'https://lens.google.com/v3/upload?ep=gsbubb&authuser=0&hl=en&st='+Date.now()"
 	if cfg.TestUpload != "" {
@@ -371,7 +376,7 @@ func uploadInBrowser(ctx context.Context, client *cdp.Client, session string, cf
 // window where the execution context is being swapped out.
 func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Config) string {
 	for i := 0; i < 10; i++ {
-		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		obj, err := client.Evaluate(cctx, session, "location.href", true)
 		cancel()
 		if err == nil && obj != nil {
@@ -391,7 +396,7 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config) (string, string) {
 	deadline := time.Now().Add(cfg.Timeout)
 	for time.Now().Before(deadline) {
-		cctx, cancel := context.WithTimeout(ctx, 3*time.Second)
+		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		obj, err := client.Evaluate(cctx, session,
 			"({tag: window.__stTag || null, skip: !!window.__stSkip})", true)
 		cancel()

@@ -180,6 +180,7 @@ func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string,
 	cmd := exec.CommandContext(ctx, helperBin, img)
 	cmd.Env = append(os.Environ(),
 		"LENS_TEST_HEADLESS=1",
+		"LENS_DEBUG=1", // stderr shows in -v output — CI forensics
 		fmt.Sprintf("LENS_TABS_PORT=%d", port),
 		"LENS_CACHE_DIR="+cacheDir,
 	)
@@ -189,6 +190,9 @@ func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string,
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	_ = cmd.Run() // contract: exit 0 either way; the JSON is the truth
+	if s := strings.TrimSpace(stderr.String()); s != "" {
+		t.Logf("helper stderr: %s", s)
+	}
 	lines := []string{}
 	for _, l := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
 		if strings.TrimSpace(l) != "" {
@@ -207,7 +211,7 @@ func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string,
 
 func closeWindow(t *testing.T, port int, cacheDir string) map[string]any {
 	t.Helper()
-	return runHelper(t, port, cacheDir, map[string]string{"LENS_ASSIST_CLOSE": "1"}, "x", 15*time.Second)
+	return runHelper(t, port, cacheDir, map[string]string{"LENS_ASSIST_CLOSE": "1"}, "x", 60*time.Second)
 }
 
 func portAnswers(port int) bool {
@@ -264,7 +268,7 @@ func TestScenarios(t *testing.T) {
 		r := runHelper(t, port, cache, map[string]string{
 			"LENS_TEST_URL":            base + page + "?selid=" + selid,
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
-		}, img, 25*time.Second)
+		}, img, 150*time.Second)
 		if r["ok"] != true || r["name"] != expect {
 			t.Errorf("%s#%s: want ok+%q, got %v", page, selid, expect, r)
 		}
@@ -278,7 +282,7 @@ func TestScenarios(t *testing.T) {
 			"LENS_TEST_URL":            base + "/results?tag=1",
 			"LENS_ASSIST_POS":          "Photo 1 of 3",
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
-		}, img, 25*time.Second)
+		}, img, 150*time.Second)
 		name, _ := r["name"].(string)
 		if r["ok"] != true || !strings.Contains(strings.ToLower(name), "antennarius commerson") {
 			t.Errorf("got %v", r)
@@ -288,7 +292,7 @@ func TestScenarios(t *testing.T) {
 		r := runHelper(t, port, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results?skip=1",
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
-		}, img, 25*time.Second)
+		}, img, 150*time.Second)
 		if r["ok"] != false || r["cancelled"] != true {
 			t.Errorf("got %v", r)
 		}
@@ -297,7 +301,7 @@ func TestScenarios(t *testing.T) {
 		r := runHelper(t, port, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results",
 			"LENS_INTERACTIVE_TIMEOUT": "2500",
-		}, img, 20*time.Second)
+		}, img, 150*time.Second)
 		if r["ok"] != false || r["cancelled"] == true {
 			t.Errorf("got %v", r)
 		}
@@ -315,7 +319,7 @@ func TestScenarios(t *testing.T) {
 		r := runHelper(t, port, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results?emptytag=1",
 			"LENS_INTERACTIVE_TIMEOUT": "2500",
-		}, img, 20*time.Second)
+		}, img, 150*time.Second)
 		if r["ok"] != false || r["cancelled"] == true {
 			t.Errorf("got %v", r)
 		}
@@ -342,7 +346,7 @@ func TestUploadPath(t *testing.T) {
 	r := runHelper(t, port, cache, map[string]string{
 		"LENS_TEST_UPLOAD_URL":     f.srv.URL + "/v3/upload",
 		"LENS_INTERACTIVE_TIMEOUT": "15000",
-	}, img, 40*time.Second)
+	}, img, 180*time.Second)
 	name, _ := r["name"].(string)
 	if r["ok"] != true || !strings.Contains(strings.ToLower(name), "antennarius commerson") {
 		t.Fatalf("upload flow did not land on a taggable results page: %v", r)
@@ -384,7 +388,7 @@ func TestDetachedLifecycle(t *testing.T) {
 	r := runHelper(t, port, cache, map[string]string{
 		"LENS_TEST_URL":            f.srv.URL + "/results",
 		"LENS_INTERACTIVE_TIMEOUT": "1500",
-	}, img, 20*time.Second)
+	}, img, 150*time.Second)
 	if r["ok"] != false {
 		t.Fatalf("scenario setup: %v", r)
 	}
@@ -399,7 +403,7 @@ func TestDetachedLifecycle(t *testing.T) {
 	r = runHelper(t, port, cache, map[string]string{
 		"LENS_TEST_URL":            f.srv.URL + "/results?skip=1",
 		"LENS_INTERACTIVE_TIMEOUT": "15000",
-	}, img, 25*time.Second)
+	}, img, 150*time.Second)
 	if r["cancelled"] != true {
 		t.Fatalf("reuse run: %v", r)
 	}
@@ -465,11 +469,11 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 		client.Close()
 	}()
 
-	session, err := newPage(ctx, client)
+	session, err := newPage(ctx, client, Config{Debug: true})
 	if err != nil {
 		t.Fatal(err)
 	}
-	cctx, cancel := context.WithTimeout(ctx, 20*time.Second)
+	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
 	if err := client.Navigate(cctx, session,
 		"data:text/html,<h2 id=sp>"+name+"</h2><p>some other, unrelated body text</p>"); err != nil {
