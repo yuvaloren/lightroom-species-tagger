@@ -104,6 +104,29 @@ function M.sectionsForTopOfDialog( f, _ )
 				f:static_text { title = 'Version: ' .. version },
 			},
 		},
+		{
+			title = 'Burst detection',
+			f:row {
+				f:checkbox {
+					title = 'Group burst photos automatically (one identification tags the whole burst)',
+					value = bind 'burstDetect',
+				},
+			},
+			f:row {
+				f:static_text { title = 'Max seconds between frames:', width = labelW, alignment = 'right' },
+				f:edit_field {
+					value = bind 'burstGapSeconds',
+					width_in_chars = 3, min = 1, max = 10, precision = 0,
+					enabled = bind 'burstDetect',
+				},
+			},
+			f:static_text {
+				title = 'Frames group only when they are close in time AND look nearly identical — ' ..
+					'a different subject one second later stays separate. Tag or Skip always acts ' ..
+					'on the whole group; one Undo restores it.',
+				wrap = true, width = 540, height_in_lines = 2,
+			},
+		},
 		uninstallSection( f ),
 	}
 end

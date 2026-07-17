@@ -18,6 +18,13 @@ M.DEFAULTS = {
 
 	-- Longest edge (px) of the downsized JPEG uploaded to Lens (also strips original EXIF/GPS).
 	maxEdge = 1024,
+
+	-- Burst detection: cluster near-identical frames shot <= burstGapSeconds
+	-- apart (chained) so one Lens identification tags the whole burst. The
+	-- similarity threshold is not a setting — it lives in Burst.lua, owned by
+	-- the accuracy corpus.
+	burstDetect = true,
+	burstGapSeconds = 1,
 }
 
 -- load( prefs ) -> cfg   (prefs may be nil / partial)
@@ -27,6 +34,10 @@ function M.load( prefs )
 		local pv = prefs and prefs[ k ]
 		if pv == nil then cfg[ k ] = v else cfg[ k ] = pv end
 	end
+	-- The gap field is free-typed in the settings dialog: coerce and clamp to a
+	-- sane range so a stray value can't glue a whole shoot into one burst.
+	local g = tonumber( cfg.burstGapSeconds ) or M.DEFAULTS.burstGapSeconds
+	cfg.burstGapSeconds = math.max( 1, math.min( 10, g ) )
 	return cfg
 end
 

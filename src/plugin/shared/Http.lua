@@ -200,6 +200,24 @@ local function interpretTagResult( d, err )
 	return d.name
 end
 
+-- Interpret hash mode's decoded stdout into (hashes|nil, err). `n` is the number
+-- of entries the caller listed; dkjson decodes JSON null to nil, so the returned
+-- array is rebuilt index-by-index to keep holes addressable. Pure (unit-tested).
+local function interpretHashResult( d, err, n )
+	if not d then return nil, err end
+	if type( d ) ~= 'table' or not d.ok then
+		return nil, 'Lens helper hash mode: ' .. ( ( type( d ) == 'table' and d.error )
+			and tostring( d.error ) or 'unusable output' )
+	end
+	local out = {}
+	local hashes = type( d.hashes ) == 'table' and d.hashes or {}
+	for i = 1, n do
+		local h = hashes[ i ]
+		out[ i ] = ( type( h ) == 'string' and h ~= '' ) and h or false -- false = no hash
+	end
+	return out
+end
+
 -- lensAssistAdapter(opts) -> { tag(imageFile, pos) -> name|nil,err ; close() }
 -- Assistive mode. tag() opens Google Lens in a VISIBLE window (reusing one window across
 -- photos, a fresh tab each), shows an "m of n" counter (pos), and blocks until the user
@@ -219,6 +237,14 @@ function M.lensAssistAdapter( opts )
 			local d, err = runHelper( helper, { { value = imageFile } }, env )
 			return interpretTagResult( d, err )
 		end,
+		-- hash( listFile, n ) -> array 1..n of dHash-hex|false, or (nil, err).
+		-- Burst detection's pixel step: LENS_HASH mode never opens Chrome — it
+		-- only fingerprints the plugin's own rendered JPEGs listed in listFile.
+		hash = function( listFile, n )
+			local env = { { 'LENS_HASH', '1' }, { 'LENS_HASH_LIST', listFile } }
+			local d, err = runHelper( helper, { { value = 'hash', raw = true } }, env )
+			return interpretHashResult( d, err, n )
+		end,
 		-- Best-effort clean shutdown of the reused window; ignores errors (nothing to close).
 		close = function()
 			local env = { { 'LENS_ASSIST_CLOSE', '1' } }
@@ -235,6 +261,7 @@ M._test = {
 	resolveHelper = resolveHelper,
 	bundledHelperCandidates = bundledHelperCandidates,
 	interpretTagResult = interpretTagResult,
+	interpretHashResult = interpretHashResult,
 }
 
 return M
