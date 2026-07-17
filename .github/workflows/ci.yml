@@ -19,15 +19,15 @@ jobs:
   build:
     runs-on: ubuntu-latest
     steps:
-      - uses: actions/checkout@v7
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
 
-      - uses: leafo/gh-actions-lua@v13
+      - uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13
         with:
           luaVersion: "5.1.5"
 
-      - uses: leafo/gh-actions-luarocks@v6
+      - uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6
 
       - name: Install Lua tooling
         # luacheck is pinned because the gate is "0 warnings" — a new luacheck
@@ -52,18 +52,28 @@ jobs:
           tail -n 30 luacov.report.out || true
 
       # ── the Go lens helper: gofmt + vet + unit tests + all four binaries ──
-      - uses: actions/setup-go@v6
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: src/helper/go.mod
           cache-dependency-path: src/helper/go.sum
 
-      - name: Helper gofmt + vet + unit tests (race detector on)
+      - name: Helper gofmt + vet + staticcheck + unit tests (race detector on)
         working-directory: src/helper
         run: |
           test -z "$(gofmt -l .)" || { gofmt -l .; echo "::error::gofmt"; exit 1; }
           go vet ./...
           go vet -tags integration ./...
+          # staticcheck pinned (like luacheck) so a new release can't flip a
+          # green PR red with no source change. Covers the default + integration
+          # build tags so the test-only files are analyzed too.
+          go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./...
+          go run honnef.co/go/tools/cmd/staticcheck@2026.1 -tags integration ./...
           go test -race ./...
+
+      - name: Shellcheck the build scripts
+        run: |
+          sudo apt-get -yq install shellcheck >/dev/null
+          shellcheck -S warning build/*.sh
 
       - name: Install llvm (llvm-lipo) — build.lua lipos the universal mac helper
         run: sudo apt-get -yq install llvm >/dev/null
@@ -170,7 +180,7 @@ jobs:
           echo "installer + wiki scripts ok"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@v7
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
         with:
           name: lrplugin
           path: |
@@ -203,8 +213,8 @@ jobs:
       run:
         shell: bash
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: src/helper/go.mod
           cache-dependency-path: src/helper/go.sum
@@ -226,8 +236,8 @@ jobs:
   macos-unit:
     runs-on: macos-15
     steps:
-      - uses: actions/checkout@v7
-      - uses: actions/setup-go@v6
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - uses: actions/setup-go@924ae3a1cded613372ab5595356fb5720e22ba16 # v6
         with:
           go-version-file: src/helper/go.mod
           cache-dependency-path: src/helper/go.sum

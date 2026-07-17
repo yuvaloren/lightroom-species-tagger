@@ -53,9 +53,14 @@ HELPER_BIN="$BUNDLE/helper/darwin-universal/lens-helper"
 [ -d "$BUNDLE" ] || die "no bundle at $BUNDLE — compose first: lua build/build.lua (cross-compiles the helper) && lua build/build.lua --no-zip"
 [ -f "$HELPER_BIN" ] || die "expected the universal helper at $HELPER_BIN — compose with darwin-universal (the default)"
 
-# ---- version (mirror build.lua's resolution) --------------------------------
+# ---- version ----------------------------------------------------------------
+# build.lua already resolved the label and wrote it beside the bundle; read that
+# so this script can never drift from the composer's resolution. --version=
+# still overrides, and a legacy standalone run (no version.txt) falls back to
+# the same rules build.lua uses.
 resolve_version() {
 	if [ -n "$VERSION_ARG" ]; then echo "${VERSION_ARG#v}"; return; fi
+	if [ -f "$DIST/version.txt" ]; then tr -d '[:space:]' < "$DIST/version.txt"; return; fi
 	if [ -n "${GITHUB_REF_NAME:-}" ] && printf '%s' "$GITHUB_REF_NAME" | grep -Eq '^v?[0-9]+\.[0-9]+\.[0-9]+'; then
 		echo "${GITHUB_REF_NAME#v}"; return
 	fi

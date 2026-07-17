@@ -11,7 +11,6 @@ package cdp
 import (
 	"context"
 	"encoding/json"
-	"errors"
 	"fmt"
 	"os"
 	"sync"
@@ -218,6 +217,13 @@ func (c *Client) Call(ctx context.Context, sessionID, method string, params, out
 
 // Subscribe registers for an event method. session "" receives the event from
 // any session (browser-level events carry no sessionId at all).
+//
+// The returned channel is buffered (64) and LOSSY by design: if it fills
+// because the consumer is slow, the read loop DROPS further events for this
+// sub rather than blocking (see readLoop). Every event we subscribe to is a
+// one-shot signal we poll around (load fired, dom content fired), so a dropped
+// duplicate is harmless and never blocking the socket is what matters. Do not
+// use this for events where every delivery must be observed.
 func (c *Client) Subscribe(method, session string) *Sub {
 	id := c.subID.Add(1)
 	sub := &subscription{method: method, session: session, ch: make(chan json.RawMessage, 64)}
@@ -226,9 +232,6 @@ func (c *Client) Subscribe(method, session string) *Sub {
 	c.subsMu.Unlock()
 	return &Sub{C: sub.ch, id: id, client: c}
 }
-
-// ErrClosed reports whether err stems from the connection being closed.
-var ErrClosed = errors.New("cdp: closed")
 
 // trace dumps raw CDP frames to stderr when LENS_CDP_TRACE=1 — forensics for
 // environment-specific protocol hangs (e.g. the macos-latest CI runner).

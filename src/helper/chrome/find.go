@@ -4,11 +4,13 @@
 package chrome
 
 import (
+	"context"
 	"os"
 	"os/exec"
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"strconv"
 	"strings"
 	"time"
 )
@@ -91,11 +93,7 @@ func PickChromeVersionDir(entries []string) string {
 		}
 		var p [4]int
 		for i, s := range strings.SplitN(e, ".", 4) {
-			n := 0
-			for _, ch := range s {
-				n = n*10 + int(ch-'0')
-			}
-			p[i] = n
+			p[i], _ = strconv.Atoi(s) // versionDirRe already guaranteed all-digits
 		}
 		if best == "" || less(bestParts, p) {
 			best, bestParts = e, p
@@ -131,17 +129,11 @@ func DetectVersion(chromePath string) Version {
 		}
 		return fallback
 	}
-	cmd := exec.Command(chromePath, "--version")
-	done := make(chan struct{})
-	var out []byte
-	var err error
-	go func() { out, err = cmd.Output(); close(done) }()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		_ = cmd.Process.Kill()
-		return fallback
-	}
+	// CommandContext kills `chrome --version` if it hangs past the deadline —
+	// no manual goroutine + Process.Kill dance.
+	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
+	defer cancel()
+	out, err := exec.CommandContext(ctx, chromePath, "--version").Output()
 	if err == nil {
 		if m := versionRe.FindStringSubmatch(string(out)); m != nil {
 			return Version{Full: m[0], Major: m[1]}

@@ -490,6 +490,10 @@ end
 local label = resolve_version()
 log( 'version label: ' .. label )
 compose( label )
+-- Record the resolved label next to the bundle so downstream steps (the signed
+-- release path, build/sign-macos.sh) don't re-implement this resolution and
+-- risk drifting from it. Sits beside the bundle, so it's never zipped into it.
+write_file( DIST .. '/version.txt', label .. '\n' )
 if opts.zip then
 	package_zips( label )
 end
