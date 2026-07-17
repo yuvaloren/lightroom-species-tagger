@@ -31,7 +31,12 @@ const os = require('os');
 const path = require('path');
 const { spawn } = require('child_process');
 
-const HELPER = path.join(__dirname, '..', 'lens-search.js');
+// Parity/T6: HELPER_CMD points this harness at ANY helper honoring the same
+// argv/env/stdout contract (e.g. the Go lens-helper binary). Default: the
+// Node helper, exactly as before.
+const HELPER_CMD = process.env.HELPER_CMD
+  ? process.env.HELPER_CMD.split(' ')
+  : [process.execPath, path.join(__dirname, '..', 'lens-search.js')];
 const TABS_PORT = '9477'; // a dedicated port so we never touch a real assist window
 const FIXTURES = path.join(__dirname, 'fixtures');
 const read = f => fs.readFileSync(path.join(FIXTURES, f), 'utf8');
@@ -88,7 +93,7 @@ function startServer() {
 // --- run the real helper against a local URL, return the parsed JSON result -----------
 function runHelper(testUrl, vars, killMs) {
   return new Promise(resolve => {
-    const child = spawn(process.execPath, [HELPER, vars.__img || 'x'], {
+    const child = spawn(HELPER_CMD[0], [...HELPER_CMD.slice(1), vars.__img || 'x'], {
       env: { ...process.env, LENS_TEST_HEADLESS: '1', LENS_TABS_PORT: TABS_PORT,
         ...(testUrl ? { LENS_TEST_URL: testUrl } : {}), ...vars },
     });
