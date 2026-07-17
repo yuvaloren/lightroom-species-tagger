@@ -3,6 +3,13 @@
 All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and the project follows
 [Semantic Versioning](https://semver.org/).
+
+## [0.4.0]
+
+### Changed
+
+- Reduced the plugin size substantially — the macOS download drops from ~90 MB to ~5 MB and the all-platforms package from ~112 MB to ~11 MB. Tagging works exactly as before: install, identify a species, write the keywords, uninstall.
+
 ## [0.3.0] - 2026-07-10
 
 ### Added

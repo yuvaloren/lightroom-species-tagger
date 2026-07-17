@@ -79,8 +79,9 @@ older copy existed on the machine), enable it once in File ▸ Plug-in Manager.
    *and* Intel) or `SpeciesTagger-<version>-win.zip` (Windows).
    (`SpeciesTagger-<version>-all.zip` carries both OSes in one — it's the package
    single-download channels like Adobe Exchange use; you don't need it.)
-   Every zip is **self-contained** — it ships its own Node runtime *and* the Lens
-   helper's dependencies, so there's no Node to install and nothing to `npm install`.
+   Every zip is **self-contained** — recognition is driven by a small native
+   helper (~6 MB) bundled inside; there is no runtime to install and nothing to
+   configure. You supply only Google Chrome.
 2. Unzip it:
    - **macOS:** double-click the zip — you get the `SpeciesTagger.lrplugin` folder.
    - **Windows:** right-click ▸ **Extract All** — Windows wraps the result in a
@@ -134,7 +135,8 @@ Open **Plug-in Manager ▸ Species Tagger**.
         keywords ◀── plan (flat + hierarchy) ◀── canonical taxon ◀── GBIF resolve
 ```
 
-1. **Google Lens** (`src/shared/Http.lua` + the Node helper `scripts/lens`): the
+1. **Google Lens** (`src/plugin/shared/Http.lua` + the bundled lens helper, a small
+   native binary built from `src/helper/`): the
    helper uploads the downsized image and opens Google Lens in your installed Chrome —
    a **visible** window showing Google's real results, with a small bottom bar (a Tag
    button, a Skip button, and an "m of n" counter). The plugin does not read the page.
@@ -149,50 +151,43 @@ Open **Plug-in Manager ▸ Species Tagger**.
    keywords, the full hierarchy, or both.
 
 The whole resolve → keyword pipeline is pure and unit-tested, independent of the browser
-helper that feeds it. The full mental model — the layers, the data flow, and a "where do
-I change X?" table — is in [ARCHITECTURE.md](docs/ARCHITECTURE.md).
+helper that feeds it. Contributor setup and the command surface are in
+[CONTRIBUTING.md](CONTRIBUTING.md).
 
 ## Building from source
 
-Everything is driven by scripts at the repo root (macOS; on Windows use WSL
-for the dev toolchain — Windows *end users* just download the release):
+Everything goes through [`just`](https://github.com/casey/just) (macOS; on Windows
+use WSL for the dev toolchain — Windows *end users* just download the release).
+`brew install just`, then:
 
 ```
-./release.sh       # ONE command: clean checkout -> signed, notarized, distributable zip
-./install.sh       # one-shot: toolchain + Lens helper deps + build + install a copy into Lightroom
-./dev-setup.sh     # just the pinned Lua 5.1 + LuaRocks toolchain (.lua-env)
-./build.sh         # build output/dist/SpeciesTagger.lrplugin (+ zip + checksums)
+just build         # from a clean checkout to the bundle + zips in output/dist/ (one command)
+just build clean   # same, wiping output/ first
+just test          # Lua specs (busted) + Go helper unit tests
+just install       # build if needed, then install a copy into Lightroom (Add/Reload)
+just check         # the full gate: lint + tests + build (run before pushing)
+just release       # the one-command signed + notarized release
 ```
 
-Or the finer-grained [`just`](https://github.com/casey/just) recipes:
-
-```
-just check         # lint + test + build (run before pushing)
-just lint          # luacheck src spec scripts
-just test          # busted unit specs
-just lens-test     # drive the real Lens helper against a fake Google (needs Chrome)
-just build         # compose the bundle, version-stamp, zip + checksums
-just install       # build + install a full plugin copy into ~/Documents/Lightroom Plugins (Add/Reload)
-just release       # the one-command signed + notarized release (= ./release.sh)
-```
-
-There is no build step to memorise and **no AI in the loop**: `just check` is the
-whole gate, and it's exactly what CI runs.
+`just build` bootstraps the toolchain if it's missing and cross-compiles the Go
+helper itself — there is no separate step to remember, and **no AI in the loop**:
+`just check` is the whole gate, and it's exactly what CI runs. See
+[CONTRIBUTING.md](CONTRIBUTING.md) for the full list.
 
 ## Repository layout — authored vs. generated
 
-*(Answering the reasonable question "is all that code in `node_modules` / `.deps`
-ours?" — no. Here's every tree and who wrote it.)*
+*(Answering the reasonable question "how much of this is third-party?" —
+almost none. Here's every tree and who wrote it.)*
 
 **Authored (this is the project):**
 
 ```
-src/shared/                 pure, testable modules (name resolver, taxonomy, keywords, http)
-src/SpeciesTagger.lrplugin/ the Lightroom glue (menus, settings, catalog writes)
-scripts/lens/               the Google Lens browser helper (lens-search.js, overlay-inject.js, tests)
-spec/                       unit specs (busted) + GBIF fixtures for offline tests
-build/build.lua             composes/stamps/zips the bundle
-docs/, *.sh, justfile       docs + entry-point scripts
+src/plugin/         the Lightroom plugin (Lua) — ships as SpeciesTagger.lrplugin
+src/plugin/shared/  pure, testable modules (name resolver, taxonomy, keywords, http)
+src/helper/         the Go lens helper (CDP client, Chrome control, overlay, tests)
+test/plugin/        unit specs (busted) + GBIF fixtures for offline tests
+build/              build.lua + the sign/package/installer/release scripts
+wiki/               the user-facing guide (generated pages)
 ```
 
 **Generated or third-party — never committed, all reproducible, all git-ignored:**
@@ -202,26 +197,28 @@ by **`just clean`**:
 
 | Tree | What it is | Ours? | How it appears |
 |---|---|---|---|
-| `output/dist/` | The built `.lrplugin` bundle + zips | generated | `./build.sh` |
+| `output/dist/` | The built `.lrplugin` bundle + zips | generated | `just build` |
 | `output/deps/` | The one Lua runtime dep (`dkjson`) | third-party | pulled by LuaRocks at build |
 
-Two dependency trees can't live under `output/` (their tools require a fixed
-location) — `just clean-all` removes them too:
+Two trees can't live under `output/` (their tools require a fixed location) —
+`just clean` removes the first, `just clean-all` the second:
 
 | Tree | What it is | Ours? | Why it's separate |
 |---|---|---|---|
-| `scripts/lens/node_modules/` | `puppeteer-core` (pure JS) | third-party | Node resolves modules next to `package.json` |
+| `src/helper/dist/` | Cross-compiled helper binaries | generated | `just build` |
 | `.lua-env/` | Pinned Lua 5.1 + LuaRocks toolchain | third-party | your installed dev env, not build output |
 
 The only third-party **runtime** code that ships inside the `.lrplugin` is `dkjson`
-(JSON) and `puppeteer-core` (drives your Chrome). Taxonomy uses GBIF over `LrHttp`;
-there's no SDK to vendor.
+(JSON); the lens helper is our own Go binary with a single small dependency
+(`coder/websocket`) compiled in. Taxonomy uses GBIF over `LrHttp`; there's no SDK
+to vendor.
 
 ## Privacy
 
 A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS) is uploaded to
 Google Lens. No third-party image host is involved. Taxonomy lookups send only
-**names** to GBIF. Full detail in [docs/PRIVACY.md](docs/PRIVACY.md).
+**names** to GBIF, and no user-typed text is sent anywhere. The security posture
+and data flow are detailed in [SECURITY.md](SECURITY.md).
 
 ## Limitations
 
@@ -252,10 +249,9 @@ third-party services.
 
 ## Contributing
 
-Issues and PRs welcome. [Building from source](#building-from-source) above is the whole
-setup — `just check` (lint + tests + build) is the entire gate. For the mental model —
-the layers, the data flow, and a "where do I change X?" table — see
-[ARCHITECTURE.md](docs/ARCHITECTURE.md).
+Issues and PRs welcome. [CONTRIBUTING.md](CONTRIBUTING.md) is the whole setup — the
+command surface, the layout, and where things live — and `just check` (lint + tests +
+build) is the entire gate.
 
 ## License
 

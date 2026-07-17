@@ -1,13 +1,13 @@
 -- busted configuration. Run with `busted` (or `just test`) from the repo root.
 return {
 	_all = {
-		-- src/shared/ for the plugin modules; output/deps/ for the pulled dkjson
-		-- (run `just deps` or `lua build/build.lua --fetch-deps` first); spec/ so
-		-- `require 'support.fixtures'` etc. resolve.
-		lpath = './?.lua;./?/init.lua;src/shared/?.lua;output/deps/?.lua;spec/?.lua',
+		-- src/plugin/shared/ for the plugin modules; output/deps/ for the pulled
+		-- dkjson (run `just deps` or `lua build/build.lua --fetch-deps` first);
+		-- test/plugin/ so `require 'support.fixtures'` etc. resolve.
+		lpath = './?.lua;./?/init.lua;src/plugin/shared/?.lua;output/deps/?.lua;test/plugin/?.lua',
 	},
 	default = {
-		ROOT = { 'spec' },
+		ROOT = { 'test/plugin' },
 		pattern = '_spec%.lua$',
 	},
 }

@@ -1,0 +1,33 @@
+name: Go toolchain EOL guard
+
+# The Go pinned in src/helper/go.mod is a CUSTOM pin Dependabot cannot see — the
+# same blind spot that once shipped an EOL Node runtime with no alarm. This
+# workflow runs build/check-go-eol.sh weekly (and whenever the pin changes)
+# so the repo goes red the moment the pinned Go cycle drops out of support.
+
+on:
+  schedule:
+    - cron: '0 15 * * 1' # Mondays 15:00 UTC = 8am Pacific
+  push:
+    branches: [ main ]
+    paths:
+      - 'src/helper/go.mod'
+      - 'build/check-go-eol.sh'
+      - '.github/workflows/go-eol.yml'
+  pull_request:
+    paths:
+      - 'src/helper/go.mod'
+      - 'build/check-go-eol.sh'
+      - '.github/workflows/go-eol.yml'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7
+      - name: Check the pinned Go toolchain against its EOL schedule
+        run: bash build/check-go-eol.sh
