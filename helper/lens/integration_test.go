@@ -179,19 +179,11 @@ func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string,
 	defer cancel()
 	cmd := exec.CommandContext(ctx, helperBin, img)
 	cmd.Env = append(os.Environ(),
+		"LENS_TEST_HEADLESS=1",
 		"LENS_DEBUG=1", // stderr shows in -v output — CI forensics
 		fmt.Sprintf("LENS_TABS_PORT=%d", port),
 		"LENS_CACHE_DIR="+cacheDir,
 	)
-	// Default to headless. The macos-latest runner's headless Chrome 151
-	// crashes the renderer on graphics init no matter the GPU flags
-	// (Inspector.detached "Render process gone." — see headlessTestFlags), so
-	// that leg sets LENS_TEST_HEADED=1 to exercise the REAL headed path, which
-	// is also what production uses. macOS runners have a WindowServer, so a
-	// headed window renders fine (Playwright's macOS CI runs headed too).
-	if os.Getenv("LENS_TEST_HEADED") != "1" {
-		cmd.Env = append(cmd.Env, "LENS_TEST_HEADLESS=1")
-	}
 	for k, v := range extra {
 		cmd.Env = append(cmd.Env, k+"="+v)
 	}
@@ -450,18 +442,11 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
-	launch := []string{
+	launch := append([]string{
 		fmt.Sprintf("--remote-debugging-port=%d", port),
 		"--user-data-dir=" + profile,
 		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
-	}
-	// Match the harness: headed when LENS_TEST_HEADED=1 (macos CI), else the
-	// headless test flags — see runHelper for why macos runs headed.
-	if os.Getenv("LENS_TEST_HEADED") == "1" {
-		launch = append(launch, "--window-size=1280,960")
-	} else {
-		launch = append(launch, headlessTestFlags...)
-	}
+	}, headlessTestFlags...)
 	launch = append(launch, "about:blank")
 	if err := chrome.SpawnDetached(chrome.Find(), launch); err != nil {
 		t.Fatal(err)

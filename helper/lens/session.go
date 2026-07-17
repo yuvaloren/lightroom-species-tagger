@@ -32,28 +32,14 @@ import (
 //go:embed overlay_inject.js
 var overlayJS string
 
-// headlessTestFlags launch Chrome headless for the test suites ONLY. On CI
-// hardware with no usable GPU the RENDERER crashes on graphics init — the
-// macos-latest runner returned Inspector.detached "Render process gone." the
-// instant a page attached, which made Page.enable hang until timeout (a real
-// Mac with a GPU passes without any of this).
-//
-// --disable-gpu alone did NOT stop it there: it disables the GPU *process*, so
-// the renderer falls back to a software path that still crashed on that
-// runner. The working approach is the opposite — KEEP the GPU process but make
-// it render through the bundled SwiftShader (software) backend via
-// --use-gl=angle + --use-angle=swiftshader, so graphics init never touches
-// Metal. The two are mutually exclusive (--disable-gpu would kill the very
-// process SwiftShader runs in), so --disable-gpu is intentionally absent.
-//
-// Production never uses this path — the user's window is headed with a real
-// GPU — so none of this can affect real use.
+// headlessTestFlags launch Chrome headless for the test suites ONLY — the
+// standard CI-headless set (no GPU, no /dev/shm dependence, no sandbox).
+// Production never uses this path; the user's window is headed with a real GPU.
 var headlessTestFlags = []string{
 	"--headless=new",
 	"--no-sandbox",
+	"--disable-gpu",
 	"--disable-dev-shm-usage",
-	"--use-gl=angle",
-	"--use-angle=swiftshader",
 }
 
 // Config is the env contract, unchanged from the Node helper (plus
