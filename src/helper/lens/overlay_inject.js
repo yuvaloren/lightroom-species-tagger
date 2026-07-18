@@ -6,15 +6,24 @@ BOTTOM (so it never covers Google's own top bar) with an "m of n" counter and th
 window.getSelection() — the species name you highlighted. Nothing on the page is
 scraped, and there is no keyword box of ours (use Google's own search box to refine).
 
-Handed to page.evaluateOnNewDocument(assistOverlayInjector, pos), so it is serialised
-and runs in the browser on every document. It communicates by setting page globals
-(window.__stTag / window.__stSkip) that the Node side POLLS — no exposeFunction, so it
-keeps working when the helper reconnects to a reused window/tab across photos. Builds
-all UI with createElement + textContent (never innerHTML). Top frame only: the same
-guard as before keeps it out of a same-origin reCAPTCHA iframe.
+Handed to page.evaluateOnNewDocument(assistOverlayInjector, pos, token), so it is
+serialised and runs in the browser on every document. It communicates by setting page
+globals (window.__stTag / window.__stSkip) that the Go side POLLS — no exposeFunction,
+so it keeps working when the helper reconnects to a reused window/tab across photos.
+
+Anti-hijack: the assist window's debug port is a fixed, predictable localhost port,
+so ANY local process could connect and blind-write window.__stTag to forge a Tag
+(observed in the wild: a stand-in process injecting a fixed species name). So the
+button does not write a bare name — it writes `<token>|<name>`, where `token` is a
+per-photo nonce the helper injected via addScriptToEvaluateOnNewDocument. The helper
+accepts a Tag only when the token matches the CURRENT photo's nonce; a blind or stale
+write (no token, wrong token) is ignored and the wait continues. Skip is tokened the
+same way. Builds all UI with createElement + textContent (never innerHTML). Top frame
+only: the same guard keeps it out of a same-origin reCAPTCHA iframe.
 ----------------------------------------------------------------------------*/
-function assistOverlayInjector(pos) {
+function assistOverlayInjector(pos, token) {
   if (window.top !== window.self) return;
+  token = token || '';
   var add = function () {
     if (!document.body || document.getElementById('__lens_assist')) return;
     var bar = document.createElement('div');
@@ -63,13 +72,14 @@ function assistOverlayInjector(pos) {
         return;
       }
       // Instant feedback the moment you press: the tag is registered and the plugin is
-      // resolving it + moving on (Node polls window.__stTag, which can take a beat).
+      // resolving it + moving on (the Go side polls window.__stTag, which can take a beat).
       tagBtn.textContent = '⏳ Tagging…';
       tagBtn.style.background = '#2f7d55';   // amber "ready" -> green "working"
       tagBtn.style.color = '#eafff2';
       tagBtn.style.cursor = 'default';
       tagBtn.disabled = true;
-      window.__stTag = sel;
+      // token-prefixed so a blind write to __stTag from another process is ignored.
+      window.__stTag = token + '|' + sel;
     };
     bar.appendChild(tagBtn);
 
@@ -77,7 +87,7 @@ function assistOverlayInjector(pos) {
     skipBtn.id = '__lens_skip';
     skipBtn.textContent = 'Skip';
     skipBtn.style.cssText = 'background:transparent;color:#a8c4b4;border:1px solid rgba(255,255,255,.22);border-radius:999px;padding:7px 12px;cursor:pointer;font:inherit';
-    skipBtn.onclick = function () { window.__stSkip = true; };
+    skipBtn.onclick = function () { window.__stSkip = token; };
     bar.appendChild(skipBtn);
 
     document.body.appendChild(bar);

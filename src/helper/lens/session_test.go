@@ -73,21 +73,71 @@ func TestFromEnvOverrides(t *testing.T) {
 // CommonJS export that would throw in a browser), then invoke the injector
 // with the counter text — the equivalent of evaluateOnNewDocument(fn, pos).
 func TestOverlaySource(t *testing.T) {
-	src := overlaySource("Photo 2 of 5")
+	src := overlaySource("Photo 2 of 5", "abc123")
 	for _, want := range []string{
 		"var module={exports:{}}",
-		"function assistOverlayInjector(pos)",
-		`assistOverlayInjector("Photo 2 of 5");`,
+		"function assistOverlayInjector(pos, token)",
+		`assistOverlayInjector("Photo 2 of 5","abc123");`,
 	} {
 		if !strings.Contains(src, want) {
 			t.Errorf("overlay source missing %q", want)
 		}
 	}
-	if src := overlaySource(""); !strings.Contains(src, "assistOverlayInjector(null);") {
+	if src := overlaySource("", "tok"); !strings.Contains(src, `assistOverlayInjector(null,"tok");`) {
 		t.Error("empty pos must inject null, not an empty string")
 	}
 	// The embedded copy is the real overlay, not a stub.
 	if !strings.Contains(overlayJS, "__lens_tag") || !strings.Contains(overlayJS, "preventDefault") {
 		t.Error("embedded overlay_inject.js is missing its load-bearing parts")
+	}
+}
+
+// acceptTag is the anti-hijack gate: a Tag counts only when it carries THIS
+// photo's nonce. A blind write to window.__stTag from another process on the
+// fixed debug port (observed: a stand-in injecting a fixed species name), or a
+// stale value from a previous photo, must be rejected. Pure — no browser.
+func TestAcceptTag(t *testing.T) {
+	const nonce = "9f3ac1"
+	ptr := func(s string) *string { return &s }
+	cases := []struct {
+		name     string
+		raw      *string
+		nonce    string
+		wantName string
+		wantOK   bool
+	}{
+		{"genuine tagged press", ptr(nonce + "|Sula nebouxii"), nonce, "Sula nebouxii", true},
+		{"trims surrounding space", ptr(nonce + "|  Sula nebouxii  "), nonce, "Sula nebouxii", true},
+		{"name may contain a pipe", ptr(nonce + "|a|b"), nonce, "a|b", true},
+		{"blind injection (no nonce) is rejected", ptr("Quercus robur"), nonce, "", false},
+		{"wrong nonce is rejected", ptr("deadbeef|Quercus robur"), nonce, "", false},
+		{"stale value from a prior photo is rejected", ptr("oldnonce|Old name"), nonce, "", false},
+		{"empty name is rejected", ptr(nonce + "|   "), nonce, "", false},
+		{"nil (nothing pressed) is rejected", nil, nonce, "", false},
+		{"empty nonce never accepts (fail-closed)", ptr("|anything"), "", "", false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			got, ok := acceptTag(c.raw, c.nonce)
+			if got != c.wantName || ok != c.wantOK {
+				t.Errorf("acceptTag(%v,%q) = (%q,%v), want (%q,%v)", c.raw, c.nonce, got, ok, c.wantName, c.wantOK)
+			}
+		})
+	}
+}
+
+// newNonce must be unguessable and unique per call, or the anti-hijack gate is
+// worthless.
+func TestNewNonce(t *testing.T) {
+	seen := map[string]bool{}
+	for i := 0; i < 1000; i++ {
+		n := newNonce()
+		if len(n) != 32 {
+			t.Fatalf("nonce %q is not 32 hex chars", n)
+		}
+		if seen[n] {
+			t.Fatalf("nonce collision: %q", n)
+		}
+		seen[n] = true
 	}
 }

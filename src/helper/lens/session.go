@@ -7,7 +7,9 @@ package lens
 
 import (
 	"context"
+	"crypto/rand"
 	_ "embed"
+	"encoding/hex"
 	"encoding/json"
 	"fmt"
 	"net/http"
@@ -137,7 +139,15 @@ func Run(cfg Config) Result {
 	if err != nil {
 		return fail("assist failed: " + err.Error())
 	}
-	if err := prepPage(ctx, client, session, cfg); err != nil {
+	// Per-photo nonce: the overlay tags as "<nonce>|<name>", and waitForTag
+	// accepts a Tag only when the nonce matches. The assist window's debug port
+	// is fixed and predictable, so a local process can connect and blind-write
+	// window.__stTag to forge a Tag (seen in the wild); without the nonce that
+	// forged value would be accepted and the plugin would "auto-tag" without ever
+	// waiting for the user. The nonce is minted here and injected into the page,
+	// so a blind writer can't produce it.
+	nonce := newNonce()
+	if err := prepPage(ctx, client, session, cfg, nonce); err != nil {
 		return fail("assist failed: " + err.Error())
 	}
 
@@ -148,7 +158,7 @@ func Run(cfg Config) Result {
 		return fail(err.Error())
 	}
 
-	outcome, name := waitForTag(ctx, client, session, cfg)
+	outcome, name := waitForTag(ctx, client, session, cfg, nonce)
 	cfg.dbg("assist outcome:", outcome, name)
 	switch outcome {
 	case "tag":
@@ -253,7 +263,17 @@ func newPage(ctx context.Context, client *cdp.Client, cfg Config) (string, error
 	return session, nil
 }
 
-func prepPage(ctx context.Context, client *cdp.Client, session string, cfg Config) error {
+// newNonce returns a fresh unguessable per-photo token. crypto/rand can't fail
+// in practice on the platforms we ship; if it ever did, a zero token would make
+// the overlay's tag ("|<name>") never match a non-empty nonce and the wait would
+// simply time out — fail-closed, never a spurious tag.
+func newNonce() string {
+	var b [16]byte
+	_, _ = rand.Read(b[:])
+	return hex.EncodeToString(b[:])
+}
+
+func prepPage(ctx context.Context, client *cdp.Client, session string, cfg Config, nonce string) error {
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
 	ver := chrome.DetectVersion(chrome.Find())
@@ -266,19 +286,22 @@ func prepPage(ctx context.Context, client *cdp.Client, session string, cfg Confi
 			return err
 		}
 	}
-	return client.AddScriptOnNewDocument(cctx, session, overlaySource(cfg.Pos))
+	return client.AddScriptOnNewDocument(cctx, session, overlaySource(cfg.Pos, nonce))
 }
 
 // overlaySource wraps the embedded overlay file in an IIFE with a `module`
-// shim (the file ends in a CommonJS export) and invokes it with pos — the
-// exact equivalent of page.evaluateOnNewDocument(assistOverlayInjector, pos).
-func overlaySource(pos string) string {
+// shim (the file ends in a CommonJS export) and invokes it with pos + the
+// per-photo nonce — the exact equivalent of
+// page.evaluateOnNewDocument(assistOverlayInjector, pos, token).
+func overlaySource(pos, token string) string {
 	posJSON := "null"
 	if pos != "" {
 		b, _ := json.Marshal(pos)
 		posJSON = string(b)
 	}
-	return "(function(){var module={exports:{}};\n" + overlayJS + "\nassistOverlayInjector(" + posJSON + ");})();"
+	tokJSON, _ := json.Marshal(token)
+	return "(function(){var module={exports:{}};\n" + overlayJS +
+		"\nassistOverlayInjector(" + posJSON + "," + string(tokJSON) + ");})();"
 }
 
 // goTo navigates and waits (bounded) for DOMContentLoaded; navigation errors
@@ -403,23 +426,28 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 // waitForTag polls the page for the user's Tag (window.__stTag) or Skip
 // (window.__stSkip), or times out. Polling page globals — not exposeFunction —
 // is what lets the helper reconnect to a reused window across photos.
-func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config) (string, string) {
+//
+// The overlay writes "<nonce>|<name>" for a Tag and the nonce for a Skip; a
+// value that doesn't carry THIS photo's nonce is a blind/stale write (the fixed
+// debug port lets any local process forge one) and is ignored, so the wait
+// continues until a genuine tokened press or the timeout.
+func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config, nonce string) (string, string) {
 	deadline := time.Now().Add(cfg.Timeout)
 	for time.Now().Before(deadline) {
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		obj, err := client.Evaluate(cctx, session,
-			"({tag: window.__stTag || null, skip: !!window.__stSkip})", true)
+			"({tag: window.__stTag || null, skip: window.__stSkip || null})", true)
 		cancel()
 		if err == nil && obj != nil {
 			var s struct {
 				Tag  *string `json:"tag"`
-				Skip bool    `json:"skip"`
+				Skip *string `json:"skip"`
 			}
 			if json.Unmarshal(obj.Value, &s) == nil {
-				if s.Tag != nil && strings.TrimSpace(*s.Tag) != "" {
-					return "tag", strings.TrimSpace(*s.Tag)
+				if name, ok := acceptTag(s.Tag, nonce); ok {
+					return "tag", name
 				}
-				if s.Skip {
+				if s.Skip != nil && *s.Skip == nonce {
 					return "skip", ""
 				}
 			}
@@ -432,4 +460,25 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 		}
 	}
 	return "timeout", ""
+}
+
+// acceptTag validates a polled window.__stTag against this photo's nonce and
+// returns the highlighted name. The overlay writes "<nonce>|<name>", so a value
+// without the exact nonce prefix — a blind or stale write from another process
+// on the fixed debug port, or a leftover from a previous photo — is rejected.
+// Pure, so the anti-hijack contract is unit-tested without a browser. An empty
+// nonce never accepts (fail-closed).
+func acceptTag(raw *string, nonce string) (string, bool) {
+	if raw == nil || nonce == "" {
+		return "", false
+	}
+	sep := strings.IndexByte(*raw, '|')
+	if sep < 0 || (*raw)[:sep] != nonce {
+		return "", false
+	}
+	name := strings.TrimSpace((*raw)[sep+1:])
+	if name == "" {
+		return "", false
+	}
+	return name, true
 }

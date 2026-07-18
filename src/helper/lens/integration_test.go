@@ -95,6 +95,12 @@ const emptyTag = "<script>setTimeout(function(){try{" +
 
 const clickSkip = "<script>setTimeout(function(){try{var b=document.getElementById('__lens_skip');if(b)b.click();}catch(e){}},1200);</script>"
 
+// blindTag simulates the exploit: a process on the assist window's fixed debug
+// port blind-writes window.__stTag with a species name and NO per-photo nonce,
+// forging a Tag the user never pressed. (Seen in the wild as a "stand-in"
+// binary injecting a fixed name.) The helper must ignore it and keep waiting.
+const blindTag = "<script>setTimeout(function(){try{window.__stTag='Quercus robur';}catch(e){}},300);</script>"
+
 func startFakeGoogle(t *testing.T) *fakeGoogle {
 	t.Helper()
 	f := &fakeGoogle{}
@@ -152,6 +158,8 @@ func startFakeGoogle(t *testing.T) *fakeGoogle {
 			inject = selectAndTag(id)
 		case q.Get("emptytag") == "1":
 			inject = emptyTag
+		case q.Get("blindtag") == "1":
+			inject = blindTag
 		case q.Get("skip") == "1":
 			inject = clickSkip
 		}
@@ -407,6 +415,33 @@ func TestUploadPath(t *testing.T) {
 	}
 }
 
+// ---- anti-hijack: a blind __stTag write is not a Tag ----------------------------
+
+// The assist window's debug port is fixed and predictable, so any local process
+// can connect and blind-write window.__stTag to forge a Tag the user never
+// pressed — observed in the wild as a stand-in binary injecting a fixed species
+// name, which made the plugin "auto-tag" every photo without ever pausing. The
+// per-photo nonce must make such a write a no-op: the run keeps waiting and
+// times out, and NEVER returns the injected name.
+func TestBlindInjectionIgnored(t *testing.T) {
+	f := startFakeGoogle(t)
+	const port = 9481
+	cache := newCacheDir(t, port)
+	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
+
+	r := runHelper(t, port, cache, map[string]string{
+		"LENS_TEST_URL":            f.srv.URL + "/results?blindtag=1",
+		"LENS_INTERACTIVE_TIMEOUT": "4000",
+	}, img, 150*time.Second)
+
+	if r["ok"] != false || r["cancelled"] == true {
+		t.Fatalf("blind window.__stTag injection was accepted as a Tag: %v", r)
+	}
+	if name, _ := r["name"].(string); strings.Contains(strings.ToLower(name), "quercus") {
+		t.Fatalf("helper returned the injected (un-nonced) value: %v", r)
+	}
+}
+
 // ---- T3: the detached-spawn lifecycle, stated as assertions ---------------------
 
 func TestDetachedLifecycle(t *testing.T) {
@@ -515,7 +550,8 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	// runner), then inject the REAL embedded overlay (the bytes the helper
 	// ships), then wait for its button to exist — no fixed sleep to race.
 	waitTrue(t, cctx, client, session, "!!document.body")
-	if _, err := client.Evaluate(cctx, session, overlaySource(""), true); err != nil {
+	const tok = "trustednonce"
+	if _, err := client.Evaluate(cctx, session, overlaySource("", tok), true); err != nil {
 		t.Fatal(err)
 	}
 	waitTrue(t, cctx, client, session, "!!document.getElementById('__lens_tag')")
@@ -564,7 +600,8 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	}
 	var tag string
 	_ = json.Unmarshal(obj.Value, &tag)
-	if tag != name {
-		t.Errorf("trusted click lost the selection: __stTag=%q, want %q", tag, name)
+	// the overlay now writes "<nonce>|<name>" so a blind write can't forge a Tag
+	if want := tok + "|" + name; tag != want {
+		t.Errorf("trusted click lost the selection: __stTag=%q, want %q", tag, want)
 	}
 }
