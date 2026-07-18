@@ -460,8 +460,17 @@ func uploadInBrowser(ctx context.Context, client *cdp.Client, session string, cf
 
 	landed := currentURL(ctx, client, session, cfg)
 	cfg.dbg("in-browser upload landed on:", landed)
+	// Don't gate on the results URL. Google may interpose a consent or human-
+	// verification page that the USER clears in the visible window before the
+	// real results load (common from a rate-limited IP). Bailing here exits the
+	// helper and tears down the overlay, so the Tag/Skip bar never appears once
+	// the results finally arrive. Stay connected instead: the overlay is
+	// registered on every new document, so it re-injects on whatever page the
+	// user reaches, and waitForTag polls there. A genuinely stuck upload simply
+	// ends when the user closes the window — the same abort path as any other
+	// non-decision.
 	if !vsridRe.MatchString(landed) {
-		return fmt.Errorf("upload rejected (no results URL) — landed on %s", landed)
+		cfg.dbg("no results URL yet (verification/consent interstitial?); waiting for the user")
 	}
 	return nil
 }

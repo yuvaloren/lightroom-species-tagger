@@ -133,6 +133,23 @@ func startFakeGoogle(t *testing.T) *fakeGoogle {
 			w.Header().Set("Location", "/results?vsrid=test&tag=1")
 			w.WriteHeader(http.StatusSeeOther)
 			return
+		case r.URL.Path == "/v3/upload-verify" && r.Method == "POST":
+			// Same upload, but Google interposes a human-verification page (NO
+			// results URL yet) that the USER clears before the results load —
+			// the flow that used to make the helper give up and exit, tearing
+			// down the overlay before the Tag bar could appear.
+			_ = r.ParseMultipartForm(32 << 20)
+			w.Header().Set("Location", "/verify")
+			w.WriteHeader(http.StatusSeeOther)
+			return
+		case r.URL.Path == "/verify":
+			// Stand in for the user passing the check: after a beat the page
+			// lands on the real results (carrying the auto-tag injection).
+			w.Header().Set("content-type", "text/html; charset=utf-8")
+			_, _ = io.WriteString(w, "<!doctype html><title>verify</title><body>verify"+
+				"<script>setTimeout(function(){location.replace('/results?vsrid=verified&tag=1')},700)</script>"+
+				"</body>")
+			return
 		}
 		page := "results.html"
 		if strings.Contains(r.URL.Path, "challenge") {
@@ -418,6 +435,32 @@ func TestUploadPath(t *testing.T) {
 	}
 	if up.secChUA != "" && !strings.Contains(up.secChUA, `v="`+ver.Major+`"`) {
 		t.Errorf("Sec-CH-UA (%s) disagrees with installed Chrome major %s", up.secChUA, ver.Major)
+	}
+}
+
+// ---- a human-verification page before the results must not lose the overlay -----
+
+// Google sometimes interposes a consent or human-verification page between the
+// upload and the results (common from a rate-limited IP). The user clears it in
+// the visible window, then the real results load. The helper must STAY CONNECTED
+// through that interstitial — if it bails when the first post-upload page isn't a
+// results URL, it exits and tears down the overlay, so the Tag/Skip bar never
+// appears once the results finally load (observed in the wild). Here the upload
+// 303s to a /verify page that self-navigates to the results after a beat; the run
+// must ride through it and end up tagging.
+func TestVerificationInterstitialStillTags(t *testing.T) {
+	f := startFakeGoogle(t)
+	cache := newCacheDir(t)
+	img := tmpImage(t, "photo-bytes-"+strings.Repeat("y", 2048))
+
+	r := runHelper(t, cache, map[string]string{
+		"LENS_TEST_UPLOAD_URL":     f.srv.URL + "/v3/upload-verify",
+		"LENS_INTERACTIVE_TIMEOUT": "20000",
+	}, img, 180*time.Second)
+
+	name, _ := r["name"].(string)
+	if r["ok"] != true || !strings.Contains(strings.ToLower(name), "antennarius") {
+		t.Fatalf("a verification page before the results broke tagging (overlay lost?): %v", r)
 	}
 }
 
