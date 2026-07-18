@@ -47,7 +47,9 @@ local function recorder( tagResults )
 			for _, m in ipairs( members ) do ids[ #ids + 1 ] = m.id end
 			rec.applied[ #rec.applied + 1 ] = { ids = ids, plan = plan }
 		end,
+		closeWindow = function() rec.closed = ( rec.closed or 0 ) + 1 end,
 	}
+	rec.closed = 0
 	return rec
 end
 
@@ -259,5 +261,48 @@ describe( 'TagRun.run — degradation and controls', function()
 		}
 		assert.equal( 3, out.clusters ) -- singletons
 		assert.equal( 3, #r.tagCalls )
+	end )
+end )
+
+describe( 'TagRun.run — the window closes only on a real decision', function()
+	it( 'closes the assist window once after a run that ends via Tag/Skip', function()
+		local r = recorder { 'Sula nebouxii', false } -- cluster1 Tag, cluster2 Skip
+		local out = TagRun.run {
+			items = items( 4 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
+			closeWindow = r.deps.closeWindow,
+		}
+		assert.is_falsy( out.aborted )
+		assert.equal( 1, r.closed ) -- closed exactly once, at the end
+	end )
+
+	it( 'leaves the window OPEN when the run aborts (window closed / helper failed)', function()
+		local r = recorder { { err = ABORTED }, nil }
+		local out = TagRun.run {
+			items = items( 4 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
+			closeWindow = r.deps.closeWindow,
+		}
+		assert.is_true( out.aborted )
+		assert.equal( 0, r.closed ) -- NOT closed: the user can still read the page
+	end )
+
+	it( 'a Skip-through still counts as decisions and closes the window', function()
+		local r = recorder { false, false } -- both clusters Skipped
+		TagRun.run {
+			items = items( 4 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
+			closeWindow = r.deps.closeWindow,
+		}
+		assert.equal( 1, r.closed )
 	end )
 end )

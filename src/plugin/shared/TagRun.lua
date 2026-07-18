@@ -33,6 +33,9 @@ run( deps ) -> summary
                     window (or the wait timed out) — a non-decision that stops the run.
   deps.resolve      function(name) -> { ok, taxon = { scientificName, commonName }, plan }
   deps.applyCluster function(memberItems[], plan) -> nil  (caller wraps ONE undo).
+  deps.closeWindow  optional function() -> nil  (shut the reused Lens window). Called
+                    ONCE at the end, and ONLY on a clean finish — never on an abort, so a
+                    window the user is still reading (or a page that failed) is left open.
   deps.onClusterDone optional function(memberItems[]) -> nil  (e.g. free temp files).
   deps.progress     optional { canceled()->bool, caption(str), portion(done,total) }
   deps.log          optional { info(str), warn(str) }
@@ -173,6 +176,11 @@ function M.run( deps )
 			deps.onClusterDone( members )
 		end
 	end
+
+	-- Close the reused Lens window ONLY on a clean finish. On an abort (the user
+	-- closed the window, or a photo could not be identified) leave it open so they
+	-- can read what's there and act — never yank it away before a decision.
+	if deps.closeWindow and not aborted then deps.closeWindow() end
 
 	return {
 		applied = applied,

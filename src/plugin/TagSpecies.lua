@@ -200,6 +200,9 @@ function M.run( _ )
 		tag = assist.tag,
 		cancelled = Http.LENS_CANCELLED,
 		aborted = Http.LENS_ABORTED,
+		-- Shut the reused window at the end of a CLEAN run only; TagRun skips this
+		-- on an abort so a window the user is still reading stays open.
+		closeWindow = function() assist.close() end,
 		resolve = function( name ) return SelectedName.resolve( name, resolveDeps, keyCfg ) end,
 		applyCluster = function( members, plan )
 			local undoLabel = #members > 1
@@ -229,7 +232,8 @@ function M.run( _ )
 		if it.file then LrFileUtils.delete( it.file ) end
 	end
 
-	assist.close() -- shut the reused window down cleanly (no "didn't shut down correctly" prompt)
+	-- NOTE: the reused window is closed inside TagRun (closeWindow dep) on a clean
+	-- finish only — an aborted run intentionally leaves it open for the user.
 	progress:done()
 
 	local tally = string.format( 'tagged %d%s', out.applied,
