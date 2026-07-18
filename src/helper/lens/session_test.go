@@ -42,12 +42,11 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	cfg := FromEnv([]string{"/tmp/photo.jpg"})
-	// The default wait is a long backstop, not a working timeout: the user ends a
-	// run by tagging/skipping each photo or by CLOSING the window (which aborts).
-	// A short default would abort a whole run just because someone pondered one
-	// hard ID, so the timeout is generous (30 min) and window-close is the signal.
+	// No interactive timeout by default (0 = wait indefinitely): a run ends only
+	// when the user tags/skips each photo or CLOSES the window (which aborts). A
+	// run may be left unattended for hours, so it must NEVER give up on a timer.
 	if cfg.Img != "/tmp/photo.jpg" || cfg.Close ||
-		cfg.Timeout != 1800*time.Second || cfg.TestHeadless || cfg.Debug {
+		cfg.Timeout != 0 || cfg.TestHeadless || cfg.Debug {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
 	if !strings.Contains(cfg.CacheDir, "speciestagger-lens") {
@@ -69,10 +68,10 @@ func TestFromEnvOverrides(t *testing.T) {
 		cfg.Timeout != 2500*time.Millisecond || !cfg.TestHeadless {
 		t.Errorf("overrides wrong: %+v", cfg)
 	}
-	// A garbage timeout falls back to the default (the long 30-min backstop).
+	// A garbage timeout falls back to the default (0 = wait indefinitely).
 	t.Setenv("LENS_INTERACTIVE_TIMEOUT", "banana")
-	if cfg = FromEnv(nil); cfg.Timeout != 1800*time.Second {
-		t.Errorf("garbage timeout not defaulted: %v", cfg.Timeout)
+	if cfg = FromEnv(nil); cfg.Timeout != 0 {
+		t.Errorf("garbage timeout not defaulted to 0: %v", cfg.Timeout)
 	}
 }
 

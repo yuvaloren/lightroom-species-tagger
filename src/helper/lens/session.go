@@ -57,7 +57,11 @@ type Config struct {
 	// <CacheDir>/chrome-profile-assist/DevToolsActivePort; every invocation
 	// discovers the window from that file. No fixed port: a well-known port
 	// can be squatted (blocking the launch) or spoofed (a fake window).
-	CacheDir     string // LENS_CACHE_DIR (default ~/.cache/speciestagger-lens)
+	CacheDir string // LENS_CACHE_DIR (default ~/.cache/speciestagger-lens)
+	// Timeout bounds the interactive wait for the user's Tag/Skip. 0 (the
+	// production default) means wait INDEFINITELY — a run can sit unattended for
+	// hours and must never abort on a timer. LENS_INTERACTIVE_TIMEOUT sets a
+	// positive bound; the test suites use it to keep "never decides" cases short.
 	Timeout      time.Duration
 	TestURL      string // LENS_TEST_URL: skip upload, go straight here
 	TestUpload   string // LENS_TEST_UPLOAD_URL: real upload flow, fake endpoint
@@ -70,10 +74,11 @@ func FromEnv(args []string) Config {
 	cfg := Config{
 		Pos:   strings.TrimSpace(os.Getenv("LENS_ASSIST_POS")),
 		Close: os.Getenv("LENS_ASSIST_CLOSE") == "1",
-		// A long backstop, not a working timeout: a run ends when the user tags/
-		// skips every photo or CLOSES the window (which aborts). A short default
-		// would abort a whole run over one slowly-identified photo.
-		Timeout:      1800 * time.Second,
+		// No interactive timeout by default (0 = wait indefinitely): a run ends
+		// when the user tags/skips every photo or CLOSES the window (which aborts).
+		// A run may be left unattended for hours, so it must never give up on a
+		// timer. LENS_INTERACTIVE_TIMEOUT (below) sets a positive bound if wanted.
+		Timeout:      0,
 		TestURL:      os.Getenv("LENS_TEST_URL"),
 		TestUpload:   os.Getenv("LENS_TEST_UPLOAD_URL"),
 		TestHeadless: os.Getenv("LENS_TEST_HEADLESS") == "1",
@@ -496,10 +501,19 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 // NO page target means the user closed it — confirmed twice in a row so a single
 // transient read can never false-abort a live run. Either way the outcome is
 // "closed", which aborts the whole run rather than silently advancing.
+//
+// cfg.Timeout <= 0 means wait INDEFINITELY (the production default): the run is
+// never abandoned on a timer, only on a Tag/Skip or a window close. A positive
+// timeout bounds the wait — the test suites set one so a "never decides" page
+// can't hang the suite; production never does.
 func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config, nonce string) (string, string) {
-	deadline := time.Now().Add(cfg.Timeout)
+	var deadline time.Time
+	bounded := cfg.Timeout > 0
+	if bounded {
+		deadline = time.Now().Add(cfg.Timeout)
+	}
 	pageGone := 0
-	for time.Now().Before(deadline) {
+	for !bounded || time.Now().Before(deadline) {
 		select {
 		case <-client.Done(): // the browser went away — user closed the window
 			return "closed", ""

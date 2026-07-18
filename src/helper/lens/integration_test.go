@@ -536,13 +536,11 @@ func TestDetachedLifecycle(t *testing.T) {
 // ---- window-close aborts the whole run -----------------------------------------
 
 // The user closing the Chrome window mid-run must ABORT the helper (ok:false,
-// aborted:true) — NOT silently time out into a skip and NOT hang. We run the
-// helper against a page that never tags, then concurrently close the assist
-// page target (the user closing the window), and assert the helper returns
-// promptly with an abort that NAMES the window as the cause. The interactive
-// timeout is set well above the time the close needs, so a run that only
-// stopped because it timed out (the pre-fix behavior, or a broken detector)
-// would report the timeout message instead and fail this test.
+// aborted:true) — NOT silently time out into a skip and NOT hang. This runs with
+// NO interactive timeout (the production default: wait indefinitely), so the
+// ONLY thing that can stop the run is the close — a self-timeout or a broken
+// detector leaves it waiting, and we further assert the run has not returned in
+// the moment before we close, then that the abort NAMES the window as the cause.
 func TestWindowCloseAborts(t *testing.T) {
 	f := startFakeGoogle(t)
 	cache := newCacheDir(t)
@@ -556,8 +554,7 @@ func TestWindowCloseAborts(t *testing.T) {
 		cmd.Env = append(os.Environ(),
 			"LENS_TEST_HEADLESS=1", "LENS_DEBUG=1",
 			"LENS_CACHE_DIR="+cache,
-			"LENS_TEST_URL="+f.srv.URL+"/results", // no tag/skip: the run waits
-			"LENS_INTERACTIVE_TIMEOUT=60000",      // 60s: far longer than a close needs
+			"LENS_TEST_URL="+f.srv.URL+"/results", // no tag/skip, no timeout: the run waits forever
 		)
 		var stdout, stderr bytes.Buffer
 		cmd.Stdout, cmd.Stderr = &stdout, &stderr
@@ -618,6 +615,14 @@ func TestWindowCloseAborts(t *testing.T) {
 	}
 	if pageID == "" {
 		t.Fatal("assist page never appeared")
+	}
+
+	// With no timeout set, the run must still be waiting here — it must not have
+	// given up on a timer while we got the page ready.
+	select {
+	case res := <-done:
+		t.Fatalf("run ended before the window was closed (self-timeout?): %v", res)
+	default:
 	}
 
 	// The user closes the window.
