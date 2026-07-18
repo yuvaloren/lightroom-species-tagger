@@ -227,13 +227,14 @@ end
 function M.lensAssistAdapter( opts )
 	opts = opts or {}
 	local helper = resolveHelper( isWindows(), opts.pluginPath )
-	local port = opts.tabsPort and tostring( opts.tabsPort ) or nil
+	-- No port is passed: the helper owns the assist window's debug port (Chrome
+	-- picks a free one; the profile's DevToolsActivePort file is the rendezvous
+	-- every invocation shares). A fixed port could be squatted or spoofed.
 
 	return {
 		tag = function( imageFile, pos )
 			local env = {}
 			if pos and pos ~= '' then env[ #env + 1 ] = { 'LENS_ASSIST_POS', pos } end
-			if port then env[ #env + 1 ] = { 'LENS_TABS_PORT', port } end
 			local d, err = runHelper( helper, { { value = imageFile } }, env )
 			return interpretTagResult( d, err )
 		end,
@@ -247,9 +248,7 @@ function M.lensAssistAdapter( opts )
 		end,
 		-- Best-effort clean shutdown of the reused window; ignores errors (nothing to close).
 		close = function()
-			local env = { { 'LENS_ASSIST_CLOSE', '1' } }
-			if port then env[ #env + 1 ] = { 'LENS_TABS_PORT', port } end
-			runHelper( helper, { { value = 'close', raw = true } }, env )
+			runHelper( helper, { { value = 'close', raw = true } }, { { 'LENS_ASSIST_CLOSE', '1' } } )
 		end,
 	}
 end

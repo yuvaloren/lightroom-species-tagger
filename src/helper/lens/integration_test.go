@@ -181,15 +181,17 @@ func startFakeGoogle(t *testing.T) *fakeGoogle {
 
 // ---- running the real helper --------------------------------------------------
 
-func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string, img string, killAfter time.Duration) map[string]any {
+// runHelper runs the real helper binary. There is no port to pass: the helper
+// owns discovery via the cache dir's profile (DevToolsActivePort) — the
+// production shape.
+func runHelper(t *testing.T, cacheDir string, extra map[string]string, img string, killAfter time.Duration) map[string]any {
 	t.Helper()
 	ctx, cancel := context.WithTimeout(context.Background(), killAfter)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, helperBin, img)
 	cmd.Env = append(os.Environ(),
 		"LENS_TEST_HEADLESS=1",
-		"LENS_DEBUG=1", // stderr shows in -v output — CI forensics
-		fmt.Sprintf("LENS_TABS_PORT=%d", port),
+		"LENS_DEBUG=1",
 		"LENS_CACHE_DIR="+cacheDir,
 	)
 	for k, v := range extra {
@@ -197,29 +199,25 @@ func runHelper(t *testing.T, port int, cacheDir string, extra map[string]string,
 	}
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	_ = cmd.Run() // contract: exit 0 either way; the JSON is the truth
+	_ = cmd.Run()
 	if s := strings.TrimSpace(stderr.String()); s != "" {
 		t.Logf("helper stderr: %s", s)
 	}
-	lines := []string{}
-	for _, l := range strings.Split(strings.TrimSpace(stdout.String()), "\n") {
-		if strings.TrimSpace(l) != "" {
-			lines = append(lines, strings.TrimSpace(l))
-		}
-	}
-	if len(lines) == 0 {
+	line := strings.TrimSpace(stdout.String())
+	if line == "" {
 		t.Fatalf("helper produced no stdout; stderr: %s", stderr.String())
 	}
+	lines := strings.Split(line, "\n")
 	var res map[string]any
-	if err := json.Unmarshal([]byte(lines[len(lines)-1]), &res); err != nil {
-		t.Fatalf("helper stdout is not one JSON line: %q (stderr: %s)", stdout.String(), stderr.String())
+	if err := json.Unmarshal([]byte(strings.TrimSpace(lines[len(lines)-1])), &res); err != nil {
+		t.Fatalf("helper stdout is not one JSON line: %q", line)
 	}
 	return res
 }
 
-func closeWindow(t *testing.T, port int, cacheDir string) map[string]any {
+func closeWindow(t *testing.T, cacheDir string) map[string]any {
 	t.Helper()
-	return runHelper(t, port, cacheDir, map[string]string{"LENS_ASSIST_CLOSE": "1"}, "x", 60*time.Second)
+	return runHelper(t, cacheDir, map[string]string{"LENS_ASSIST_CLOSE": "1"}, "x", 60*time.Second)
 }
 
 func portAnswers(port int) bool {
@@ -255,16 +253,26 @@ func waitTrue(t *testing.T, ctx context.Context, client *cdp.Client, session, ex
 // fatal-on-error cleanup races Chrome's async shutdown writes (seen flaking
 // on both darwin and linux); a leftover tmp dir is harmless, a red test run
 // from a straggling profile write is not.
-func newCacheDir(t *testing.T, port int) string {
+func newCacheDir(t *testing.T) string {
 	dir, err := os.MkdirTemp("", "lens-it-cache")
 	if err != nil {
 		t.Fatal(err)
 	}
 	t.Cleanup(func() {
-		closeWindow(t, port, dir)
+		closeWindow(t, dir)
 		removeProfileDir(dir)
 	})
 	return dir
+}
+
+// activePort reads the port Chrome chose for the window rooted at cacheDir.
+func activePort(t *testing.T, cacheDir string) int {
+	t.Helper()
+	p, err := readDevToolsActivePort(filepath.Join(cacheDir, "chrome-profile-assist"))
+	if err != nil {
+		t.Fatalf("no DevToolsActivePort under %s: %v", cacheDir, err)
+	}
+	return p
 }
 
 // removeProfileDir deletes a Chrome profile dir WITHOUT racing Chrome's async
@@ -297,14 +305,13 @@ func tmpImage(t *testing.T, content string) string {
 
 func TestScenarios(t *testing.T) {
 	f := startFakeGoogle(t)
-	const port = 9477
-	cache := newCacheDir(t, port) // closes the window + tidies up, race-free
+	cache := newCacheDir(t) // closes the window + tidies up, race-free
 	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
 	base := f.srv.URL
 
 	sel := func(page, selid, expect string) {
 		t.Helper()
-		r := runHelper(t, port, cache, map[string]string{
+		r := runHelper(t, cache, map[string]string{
 			"LENS_TEST_URL":            base + page + "?selid=" + selid,
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
 		}, img, 150*time.Second)
@@ -317,7 +324,7 @@ func TestScenarios(t *testing.T) {
 	}
 
 	t.Run("A highlight+Tag returns only the selection", func(t *testing.T) {
-		r := runHelper(t, port, cache, map[string]string{
+		r := runHelper(t, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results?tag=1",
 			"LENS_ASSIST_POS":          "Photo 1 of 3",
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
@@ -328,7 +335,7 @@ func TestScenarios(t *testing.T) {
 		}
 	})
 	t.Run("B skip means cancelled, reusing the window", func(t *testing.T) {
-		r := runHelper(t, port, cache, map[string]string{
+		r := runHelper(t, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results?skip=1",
 			"LENS_INTERACTIVE_TIMEOUT": "15000",
 		}, img, 150*time.Second)
@@ -337,7 +344,7 @@ func TestScenarios(t *testing.T) {
 		}
 	})
 	t.Run("C timeout is ok=false and NOT cancelled", func(t *testing.T) {
-		r := runHelper(t, port, cache, map[string]string{
+		r := runHelper(t, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results",
 			"LENS_INTERACTIVE_TIMEOUT": "2500",
 		}, img, 150*time.Second)
@@ -355,7 +362,7 @@ func TestScenarios(t *testing.T) {
 		sel("/results", "__t_curly", "“Randall’s frogfish”")
 	})
 	t.Run("H empty-selection Tag nudges then times out", func(t *testing.T) {
-		r := runHelper(t, port, cache, map[string]string{
+		r := runHelper(t, cache, map[string]string{
 			"LENS_TEST_URL":            base + "/results?emptytag=1",
 			"LENS_INTERACTIVE_TIMEOUT": "2500",
 		}, img, 150*time.Second)
@@ -367,7 +374,7 @@ func TestScenarios(t *testing.T) {
 		sel("/challenge", "__t_binomial", "Antennarius commerson")
 	})
 	t.Run("D close shuts the window down cleanly", func(t *testing.T) {
-		if r := closeWindow(t, port, cache); r["ok"] != true {
+		if r := closeWindow(t, cache); r["ok"] != true {
 			t.Errorf("got %v", r)
 		}
 	})
@@ -377,12 +384,11 @@ func TestScenarios(t *testing.T) {
 
 func TestUploadPath(t *testing.T) {
 	f := startFakeGoogle(t)
-	const port = 9478
-	cache := newCacheDir(t, port)
+	cache := newCacheDir(t)
 	imgBytes := "definitely-the-photo-bytes-" + strings.Repeat("x", 4096)
 	img := tmpImage(t, imgBytes)
 
-	r := runHelper(t, port, cache, map[string]string{
+	r := runHelper(t, cache, map[string]string{
 		"LENS_TEST_UPLOAD_URL":     f.srv.URL + "/v3/upload",
 		"LENS_INTERACTIVE_TIMEOUT": "15000",
 	}, img, 180*time.Second)
@@ -415,6 +421,41 @@ func TestUploadPath(t *testing.T) {
 	}
 }
 
+// ---- port independence: a squatter on a well-known port must not matter ---------
+
+// The assist window's debug port used to be FIXED (9333/9334): if anything else
+// on the machine held that port — another tool, a stale Chrome, a squatter —
+// connect() would fail and the launch path would try to bind the SAME taken
+// port, so the helper could never start its window at all (and a malicious
+// squatter speaking CDP could even get driven as if it were ours). The port
+// must come from Chrome itself (--remote-debugging-port=0 + the profile's
+// DevToolsActivePort file), making the well-known port irrelevant.
+func TestSquattedLegacyPortStillWorks(t *testing.T) {
+	// squat the legacy default port with a non-Chrome HTTP server
+	ln, err := net.Listen("tcp", "127.0.0.1:9333")
+	if err != nil {
+		t.Skipf("legacy port 9333 unavailable to squat: %v", err)
+	}
+	squatter := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		http.Error(w, "not chrome", http.StatusNotFound)
+	})}
+	go func() { _ = squatter.Serve(ln) }()
+	t.Cleanup(func() { _ = squatter.Close() })
+
+	f := startFakeGoogle(t)
+	cache := newCacheDir(t)
+	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
+
+	// no LENS_TABS_PORT: the helper must find/launch its own window regardless
+	r := runHelper(t, cache, map[string]string{
+		"LENS_TEST_URL":            f.srv.URL + "/results?skip=1",
+		"LENS_INTERACTIVE_TIMEOUT": "15000",
+	}, img, 150*time.Second)
+	if r["ok"] != false || r["cancelled"] != true {
+		t.Fatalf("helper could not run with the legacy port squatted: %v", r)
+	}
+}
+
 // ---- anti-hijack: a blind __stTag write is not a Tag ----------------------------
 
 // The assist window's debug port is fixed and predictable, so any local process
@@ -425,11 +466,10 @@ func TestUploadPath(t *testing.T) {
 // times out, and NEVER returns the injected name.
 func TestBlindInjectionIgnored(t *testing.T) {
 	f := startFakeGoogle(t)
-	const port = 9481
-	cache := newCacheDir(t, port)
+	cache := newCacheDir(t)
 	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
 
-	r := runHelper(t, port, cache, map[string]string{
+	r := runHelper(t, cache, map[string]string{
 		"LENS_TEST_URL":            f.srv.URL + "/results?blindtag=1",
 		"LENS_INTERACTIVE_TIMEOUT": "4000",
 	}, img, 150*time.Second)
@@ -446,12 +486,11 @@ func TestBlindInjectionIgnored(t *testing.T) {
 
 func TestDetachedLifecycle(t *testing.T) {
 	f := startFakeGoogle(t)
-	const port = 9479
-	cache := newCacheDir(t, port)
+	cache := newCacheDir(t)
 	img := tmpImage(t, "x")
 
 	// Helper #1 launches Chrome, times out quickly, and exits...
-	r := runHelper(t, port, cache, map[string]string{
+	r := runHelper(t, cache, map[string]string{
 		"LENS_TEST_URL":            f.srv.URL + "/results",
 		"LENS_INTERACTIVE_TIMEOUT": "1500",
 	}, img, 150*time.Second)
@@ -461,12 +500,12 @@ func TestDetachedLifecycle(t *testing.T) {
 	// ...and the DETACHED Chrome must survive the helper's death. If this
 	// fails, window reuse across photos is broken (the DETACHED_PROCESS /
 	// Setsid risk this plan calls out — especially on Windows).
-	if !portAnswers(port) {
+	if !portAnswers(activePort(t, cache)) {
 		t.Fatal("Chrome died with the helper — detached spawn is broken on " + runtime.GOOS)
 	}
 	// Helper #2 reuses the same window (fast path: connect, not launch).
 	start := time.Now()
-	r = runHelper(t, port, cache, map[string]string{
+	r = runHelper(t, cache, map[string]string{
 		"LENS_TEST_URL":            f.srv.URL + "/results?skip=1",
 		"LENS_INTERACTIVE_TIMEOUT": "15000",
 	}, img, 150*time.Second)
@@ -476,8 +515,9 @@ func TestDetachedLifecycle(t *testing.T) {
 	if time.Since(start) > 15*time.Second {
 		t.Errorf("reuse run took %v — did it relaunch instead of reconnect?", time.Since(start))
 	}
-	// Close ends the window; the port must go dark.
-	if r := closeWindow(t, port, cache); r["ok"] != true {
+	// Close ends the window; the (Chrome-chosen) port must go dark.
+	port := activePort(t, cache)
+	if r := closeWindow(t, cache); r["ok"] != true {
 		t.Fatalf("close: %v", r)
 	}
 	dead := false
@@ -501,15 +541,14 @@ func TestDetachedLifecycle(t *testing.T) {
 // broken once — a programmatic .click() (scenarios above) can't catch it;
 // only a trusted, CDP-dispatched click does.
 func TestTrustedClickPreservesSelection(t *testing.T) {
-	const port = 9480
 	const name = "Conolophus pallidus"
-	cache := newCacheDir(t, port)
+	cache := newCacheDir(t)
 	profile := filepath.Join(cache, "chrome-profile-assist")
 	if err := os.MkdirAll(profile, 0o755); err != nil {
 		t.Fatal(err)
 	}
 	launch := append([]string{
-		fmt.Sprintf("--remote-debugging-port=%d", port),
+		"--remote-debugging-port=0",
 		"--user-data-dir=" + profile,
 		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
 	}, headlessTestFlags...)
@@ -521,7 +560,11 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	var client *cdp.Client
 	for i := 0; i < 100; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if c, err := connect(ctx, port); err == nil {
+		p, err := readDevToolsActivePort(profile)
+		if err != nil {
+			continue
+		}
+		if c, err := connect(ctx, p); err == nil {
 			client = c
 			break
 		}

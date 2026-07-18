@@ -4,6 +4,10 @@
 // user highlighted. Go replacement for the old bundled-Node lens-search.js —
 // same argv/env contract, same one-JSON-line stdout contract.
 //
+// The assist window's debug port is chosen by Chrome itself
+// (--remote-debugging-port=0) and shared between invocations via the profile's
+// DevToolsActivePort file — never a fixed, squattable port.
+//
 //	lens-helper <image.jpg>          tag one photo (blocks on the user)
 //	LENS_ASSIST_CLOSE=1 lens-helper  close the reused window cleanly
 //	LENS_HASH=1 LENS_HASH_LIST=<f>   dHash every image listed in <f> (burst

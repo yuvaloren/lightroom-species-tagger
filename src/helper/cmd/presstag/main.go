@@ -5,9 +5,11 @@
 // Tag arrives and then proceeds — the regression class where the assist loop
 // stopped waiting for the user.
 //
-//	go run ./cmd/presstag -port 9334 -tag "Sula nebouxii"   # press Tag
-//	go run ./cmd/presstag -port 9334 -skip                  # press Skip
-//	go run ./cmd/presstag -port 9334 -peek                  # print page URLs
+//	go run ./cmd/presstag -tag "Sula nebouxii"     # press Tag (default cache dir)
+//	go run ./cmd/presstag -skip                    # press Skip
+//	go run ./cmd/presstag -peek                    # print page URLs
+//	go run ./cmd/presstag -cache /tmp/c -tag ...   # explicit LENS_CACHE_DIR
+//	go run ./cmd/presstag -port 38401 -tag ...     # explicit port override
 package main
 
 import (
@@ -17,6 +19,8 @@ import (
 	"fmt"
 	"net/http"
 	"os"
+	"path/filepath"
+	"strings"
 	"time"
 
 	"github.com/yuvaloren/lightroom-species-tagger/helper/cdp"
@@ -32,7 +36,8 @@ func die(msg string, err error) {
 }
 
 func main() {
-	port := flag.Int("port", 9334, "assist window debug port (LENS_TABS_PORT)")
+	port := flag.Int("port", 0, "explicit debug port (default: discover via -cache)")
+	cache := flag.String("cache", "", "LENS_CACHE_DIR the assist window was started with (default ~/.cache/speciestagger-lens)")
 	tag := flag.String("tag", "", "species name to press Tag with")
 	skip := flag.Bool("skip", false, "press Skip instead")
 	peek := flag.Bool("peek", false, "just list page targets")
@@ -43,6 +48,24 @@ func main() {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
 	defer cancel()
+
+	// No fixed port: discover the window the way the helper does — from the
+	// profile's DevToolsActivePort file — unless -port overrides.
+	if *port == 0 {
+		dir := *cache
+		if dir == "" {
+			home, _ := os.UserHomeDir()
+			dir = filepath.Join(home, ".cache", "speciestagger-lens")
+		}
+		raw, err := os.ReadFile(filepath.Join(dir, "chrome-profile-assist", "DevToolsActivePort"))
+		if err != nil {
+			die("no assist window (no DevToolsActivePort under "+dir+")", err)
+		}
+		fmt.Sscanf(strings.SplitN(string(raw), "\n", 2)[0], "%d", port)
+		if *port <= 0 {
+			die("DevToolsActivePort is malformed", nil)
+		}
+	}
 
 	// browser-level websocket from /json/version (same dial as the helper's own)
 	resp, err := http.Get(fmt.Sprintf("http://127.0.0.1:%d/json/version", *port))

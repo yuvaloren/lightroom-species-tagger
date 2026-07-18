@@ -44,8 +44,6 @@ local Log = require 'Log'
 local M = {}
 local log = Log.new( 'SpeciesTagger' )
 
--- Remote-debug port for the reused assist window (its own, distinct from any other Chrome).
-local ASSIST_PORT = 9334
 
 --------------------------------------------------------------------------------
 -- helpers
@@ -148,10 +146,7 @@ function M.run( _ )
 		prefs.firstRunDone = true
 	end
 
-	local assist = Http.lensAssistAdapter {
-		pluginPath = _PLUGIN.path,
-		tabsPort = ASSIST_PORT,
-	}
+	local assist = Http.lensAssistAdapter { pluginPath = _PLUGIN.path }
 	local resolveDeps = { http = Http.lrAdapter(), cache = {} } -- shared GBIF cache for the run
 	local keyCfg = { keywordMode = cfg.keywordMode }
 

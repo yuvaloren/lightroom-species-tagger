@@ -2,6 +2,8 @@ package lens
 
 import (
 	"encoding/json"
+	"os"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
@@ -32,13 +34,13 @@ func TestResultEncoding(t *testing.T) {
 }
 
 func TestFromEnvDefaults(t *testing.T) {
-	for _, k := range []string{"LENS_ASSIST_POS", "LENS_ASSIST_CLOSE", "LENS_TABS_PORT",
+	for _, k := range []string{"LENS_ASSIST_POS", "LENS_ASSIST_CLOSE",
 		"LENS_CACHE_DIR", "LENS_INTERACTIVE_TIMEOUT", "LENS_TEST_URL",
 		"LENS_TEST_UPLOAD_URL", "LENS_TEST_HEADLESS", "LENS_DEBUG"} {
 		t.Setenv(k, "")
 	}
 	cfg := FromEnv([]string{"/tmp/photo.jpg"})
-	if cfg.Img != "/tmp/photo.jpg" || cfg.Close || cfg.TabsPort != 9333 ||
+	if cfg.Img != "/tmp/photo.jpg" || cfg.Close ||
 		cfg.Timeout != 180*time.Second || cfg.TestHeadless || cfg.Debug {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
@@ -50,7 +52,6 @@ func TestFromEnvDefaults(t *testing.T) {
 func TestFromEnvOverrides(t *testing.T) {
 	t.Setenv("LENS_ASSIST_POS", "  Photo 2 of 5  ")
 	t.Setenv("LENS_ASSIST_CLOSE", "1")
-	t.Setenv("LENS_TABS_PORT", "9477")
 	t.Setenv("LENS_CACHE_DIR", "/tmp/st-cache")
 	t.Setenv("LENS_INTERACTIVE_TIMEOUT", "2500")
 	t.Setenv("LENS_TEST_HEADLESS", "1")
@@ -58,7 +59,7 @@ func TestFromEnvOverrides(t *testing.T) {
 	if cfg.Pos != "Photo 2 of 5" { // trimmed, like the JS .trim()
 		t.Errorf("pos: %q", cfg.Pos)
 	}
-	if !cfg.Close || cfg.TabsPort != 9477 || cfg.CacheDir != "/tmp/st-cache" ||
+	if !cfg.Close || cfg.CacheDir != "/tmp/st-cache" ||
 		cfg.Timeout != 2500*time.Millisecond || !cfg.TestHeadless {
 		t.Errorf("overrides wrong: %+v", cfg)
 	}
@@ -89,6 +90,41 @@ func TestOverlaySource(t *testing.T) {
 	// The embedded copy is the real overlay, not a stub.
 	if !strings.Contains(overlayJS, "__lens_tag") || !strings.Contains(overlayJS, "preventDefault") {
 		t.Error("embedded overlay_inject.js is missing its load-bearing parts")
+	}
+}
+
+// readDevToolsActivePort is how every invocation finds the reused window —
+// Chrome picks its own port and records it here. Partial files (Chrome's write
+// is not atomic) and garbage must read as "not ready", never as a bogus port.
+func TestReadDevToolsActivePort(t *testing.T) {
+	dir := t.TempDir()
+	write := func(content string) {
+		if err := os.WriteFile(filepath.Join(dir, "DevToolsActivePort"), []byte(content), 0o644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if _, err := readDevToolsActivePort(dir); err == nil {
+		t.Error("missing file must error")
+	}
+	write("38401\n/devtools/browser/uuid-here\n")
+	if p, err := readDevToolsActivePort(dir); err != nil || p != 38401 {
+		t.Errorf("valid file: got (%d,%v)", p, err)
+	}
+	write("38401") // mid-write: port line only, no ws line yet
+	if _, err := readDevToolsActivePort(dir); err == nil {
+		t.Error("partial (one-line) file must error")
+	}
+	write("banana\n/devtools/browser/x\n")
+	if _, err := readDevToolsActivePort(dir); err == nil {
+		t.Error("garbage port must error")
+	}
+	write("0\n/devtools/browser/x\n")
+	if _, err := readDevToolsActivePort(dir); err == nil {
+		t.Error("port 0 must error")
+	}
+	write("38402\r\n/devtools/browser/x\r\n") // CRLF (windows)
+	if p, err := readDevToolsActivePort(dir); err != nil || p != 38402 {
+		t.Errorf("CRLF file: got (%d,%v)", p, err)
 	}
 }
 

@@ -35,7 +35,6 @@ import (
 const liveTag = "LIVE-SMOKE-OK"
 
 func TestLiveSmoke(t *testing.T) {
-	const port = 9481
 	bin := buildLiveHelper(t)
 	img := generateJPEG(t)
 	cache, err := os.MkdirTemp("", "lens-live-cache")
@@ -47,7 +46,7 @@ func TestLiveSmoke(t *testing.T) {
 	// a live dir) then a best-effort delete of the moved copy. No sleep.
 	t.Cleanup(func() {
 		cmd := exec.Command(bin, "x")
-		cmd.Env = append(os.Environ(), "LENS_ASSIST_CLOSE=1", "LENS_TABS_PORT=9481", "LENS_CACHE_DIR="+cache)
+		cmd.Env = append(os.Environ(), "LENS_ASSIST_CLOSE=1", "LENS_CACHE_DIR="+cache)
 		_ = cmd.Run()
 		trash := cache + ".trash"
 		if os.Rename(cache, trash) == nil {
@@ -60,11 +59,10 @@ func TestLiveSmoke(t *testing.T) {
 	// global the real Tag button sets.
 	ctx, cancel := context.WithTimeout(context.Background(), 90*time.Second)
 	defer cancel()
-	go standInHuman(ctx, t, port)
+	go standInHuman(ctx, t, cache)
 
 	cmd := exec.CommandContext(ctx, bin, img)
 	cmd.Env = append(os.Environ(),
-		"LENS_TABS_PORT=9481",
 		"LENS_CACHE_DIR="+cache,
 		"LENS_ASSIST_POS=Live smoke",
 		"LENS_INTERACTIVE_TIMEOUT=60000",
@@ -84,11 +82,16 @@ func TestLiveSmoke(t *testing.T) {
 	t.Log("real-Google upload + results + tag poll: OK")
 }
 
-func standInHuman(ctx context.Context, t *testing.T, port int) {
+func standInHuman(ctx context.Context, t *testing.T, cache string) {
 	vsrid := regexp.MustCompile(`[?&]vsrid=`)
+	profile := filepath.Join(cache, "chrome-profile-assist")
 	var client *cdp.Client
 	for ctx.Err() == nil && client == nil {
 		time.Sleep(500 * time.Millisecond)
+		port, err := readDevToolsActivePort(profile)
+		if err != nil {
+			continue // Chrome not up yet
+		}
 		if c, err := connect(ctx, port); err == nil {
 			client = c
 		}
@@ -111,9 +114,16 @@ func standInHuman(ctx context.Context, t *testing.T, port int) {
 			if err != nil {
 				continue
 			}
-			_, err = client.Evaluate(ctx, session, `window.__stTag = "`+liveTag+`"`, true)
-			if err == nil {
-				t.Log("stood in for the human: __stTag set on the results page")
+			// Press the REAL overlay button with a real selection — a direct
+			// window.__stTag write would (correctly) be rejected by the
+			// per-photo nonce, exactly like any other blind injection.
+			press := `(function(){var el=document.createElement('span');el.textContent="` + liveTag + `";` +
+				`el.style.cssText='position:fixed;left:-9999px';document.body.appendChild(el);` +
+				`var r=document.createRange();r.selectNodeContents(el);` +
+				`var s=window.getSelection();s.removeAllRanges();s.addRange(r);` +
+				`var b=document.getElementById('__lens_tag');if(b)b.click();return !!b;})()`
+			if obj, err := client.Evaluate(ctx, session, press, true); err == nil && string(obj.Value) == "true" {
+				t.Log("stood in for the human: pressed the real Tag button on the results page")
 				return
 			}
 		}

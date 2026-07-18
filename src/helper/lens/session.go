@@ -49,10 +49,14 @@ var headlessTestFlags = []string{
 // the REAL upload path against a local endpoint — the one flow LENS_TEST_URL
 // skips entirely).
 type Config struct {
-	Img          string
-	Pos          string // LENS_ASSIST_POS: "Photo 2 of 5"
-	Close        bool   // LENS_ASSIST_CLOSE=1
-	TabsPort     int    // LENS_TABS_PORT (default 9333)
+	Img   string
+	Pos   string // LENS_ASSIST_POS: "Photo 2 of 5"
+	Close bool   // LENS_ASSIST_CLOSE=1
+	// CacheDir is the rendezvous for the reused window: Chrome picks its OWN
+	// debug port (--remote-debugging-port=0) and records it in
+	// <CacheDir>/chrome-profile-assist/DevToolsActivePort; every invocation
+	// discovers the window from that file. No fixed port: a well-known port
+	// can be squatted (blocking the launch) or spoofed (a fake window).
 	CacheDir     string // LENS_CACHE_DIR (default ~/.cache/speciestagger-lens)
 	Timeout      time.Duration
 	TestURL      string // LENS_TEST_URL: skip upload, go straight here
@@ -66,7 +70,6 @@ func FromEnv(args []string) Config {
 	cfg := Config{
 		Pos:          strings.TrimSpace(os.Getenv("LENS_ASSIST_POS")),
 		Close:        os.Getenv("LENS_ASSIST_CLOSE") == "1",
-		TabsPort:     9333,
 		Timeout:      180 * time.Second,
 		TestURL:      os.Getenv("LENS_TEST_URL"),
 		TestUpload:   os.Getenv("LENS_TEST_UPLOAD_URL"),
@@ -75,9 +78,6 @@ func FromEnv(args []string) Config {
 	}
 	if len(args) > 0 {
 		cfg.Img = args[0]
-	}
-	if p, err := strconv.Atoi(os.Getenv("LENS_TABS_PORT")); err == nil && p > 0 {
-		cfg.TabsPort = p
 	}
 	if ms, err := strconv.Atoi(os.Getenv("LENS_INTERACTIVE_TIMEOUT")); err == nil && ms > 0 {
 		cfg.Timeout = time.Duration(ms) * time.Millisecond
@@ -114,13 +114,16 @@ func (c Config) dbg(a ...any) {
 func Run(cfg Config) Result {
 	ctx := context.Background()
 
-	// Close command: connect to the reuse window and shut it down cleanly.
+	// Close command: discover the reuse window from the profile and shut it
+	// down cleanly. No window (no file, dead port) means nothing to close.
 	if cfg.Close {
-		if client, _ := connect(ctx, cfg.TabsPort); client != nil {
-			cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
-			_ = client.BrowserClose(cctx)
-			cancel()
-			client.Close()
+		if port, err := readDevToolsActivePort(profileDir(cfg)); err == nil {
+			if client, _ := connect(ctx, port); client != nil {
+				cctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+				_ = client.BrowserClose(cctx)
+				cancel()
+				client.Close()
+			}
 		}
 		return Result{OK: true, Closed: true}
 	}
@@ -197,18 +200,55 @@ func connect(ctx context.Context, port int) (*cdp.Client, error) {
 	return cdp.Dial(dctx, v.WebSocketDebuggerURL)
 }
 
-// connectOrLaunch mirrors connectWindow(true): reuse the window on TABS_PORT,
-// or launch a detached one and poll it up (100 × 100 ms).
-func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
-	if client, _ := connect(ctx, cfg.TabsPort); client != nil {
-		return client, nil
+// profileDir is the reused assist window's user-data-dir — the rendezvous
+// every invocation shares.
+func profileDir(cfg Config) string {
+	return filepath.Join(cfg.CacheDir, "chrome-profile-assist")
+}
+
+// readDevToolsActivePort parses <profile>/DevToolsActivePort, the file Chrome
+// writes once its DevTools server is listening: line 1 is the port, line 2 the
+// browser websocket path. Chrome's write is not atomic, so a partial file (no
+// second line yet) is an error — callers poll until it parses. Pure enough to
+// unit-test with a temp dir.
+func readDevToolsActivePort(profile string) (int, error) {
+	raw, err := os.ReadFile(filepath.Join(profile, "DevToolsActivePort"))
+	if err != nil {
+		return 0, err
 	}
-	profile := filepath.Join(cfg.CacheDir, "chrome-profile-assist")
+	lines := strings.Split(strings.ReplaceAll(string(raw), "\r\n", "\n"), "\n")
+	if len(lines) < 2 || strings.TrimSpace(lines[1]) == "" {
+		return 0, fmt.Errorf("DevToolsActivePort incomplete (mid-write?)")
+	}
+	port, err := strconv.Atoi(strings.TrimSpace(lines[0]))
+	if err != nil || port <= 0 {
+		return 0, fmt.Errorf("DevToolsActivePort has no valid port: %q", lines[0])
+	}
+	return port, nil
+}
+
+// connectOrLaunch reuses the assist window recorded in the profile's
+// DevToolsActivePort file, or launches a detached one and polls the file up
+// (100 × 100 ms). Chrome picks its own free port (--remote-debugging-port=0):
+// a fixed well-known port could be squatted by another process — blocking the
+// launch entirely — or spoofed; with port 0 neither is possible and concurrent
+// runs (two catalogs, two users) can't collide.
+func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
+	profile := profileDir(cfg)
+	if port, err := readDevToolsActivePort(profile); err == nil {
+		if client, _ := connect(ctx, port); client != nil {
+			return client, nil
+		}
+		// stale file from a dead Chrome: fall through to a fresh launch
+	}
 	_ = os.MkdirAll(profile, 0o755)
+	// Remove the stale port file BEFORE spawning so the poll below can only
+	// ever see the file the NEW Chrome writes — never a dead leftover.
+	_ = os.Remove(filepath.Join(profile, "DevToolsActivePort"))
 	chrome.MarkProfileClean(profile) // never nag about a previous unclean exit
 	chromePath := chrome.Find()
 	args := []string{
-		"--remote-debugging-port=" + strconv.Itoa(cfg.TabsPort),
+		"--remote-debugging-port=0",
 		"--user-data-dir=" + profile,
 		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
 	}
@@ -219,15 +259,19 @@ func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
 	}
 	args = append(args, "about:blank")
 	if err := chrome.SpawnDetached(chromePath, args); err != nil {
-		return nil, fmt.Errorf("could not start the assist Chrome window (port %d): %s", cfg.TabsPort, err)
+		return nil, fmt.Errorf("could not start the assist Chrome window: %s", err)
 	}
 	for i := 0; i < 100; i++ {
 		time.Sleep(100 * time.Millisecond)
-		if client, _ := connect(ctx, cfg.TabsPort); client != nil {
+		port, err := readDevToolsActivePort(profile)
+		if err != nil {
+			continue // not written (or mid-write) yet
+		}
+		if client, _ := connect(ctx, port); client != nil {
 			return client, nil
 		}
 	}
-	return nil, fmt.Errorf("could not start the assist Chrome window (port %d)", cfg.TabsPort)
+	return nil, fmt.Errorf("could not start the assist Chrome window (no DevToolsActivePort)")
 }
 
 // newPage opens a fresh tab for this photo and closes the others, so there is
