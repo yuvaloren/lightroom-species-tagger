@@ -166,6 +166,12 @@ jobs:
           unzip -l "$ALL" | grep -q 'lens-helper\.exe' || { echo "::error::all zip is missing the Windows helpers"; exit 1; }
           echo "bundle + zips ok"
 
+      - name: Helper executable guard (bundle + zips + install)
+        # The lens helper must stay +x everywhere it lands — including after
+        # `lua build/build.lua --install`, whose plain byte-copy once dropped the
+        # bit and left the installed plugin unable to run the helper at all.
+        run: bash build/check-exec.sh
+
       - name: Validate installer + wiki scripts
         # Validation-only (like all of CI): compiles the REAL Windows installer
         # from the just-built -win zip (unsigned — sign-win.sh skips without

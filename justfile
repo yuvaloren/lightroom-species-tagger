@@ -95,8 +95,14 @@ burst-accuracy *ARGS: _deps
     ( cd src/helper && go build -o ../../output/accuracy/lens-helper . )
     lua build/burst-accuracy.lua --helper output/accuracy/lens-helper {{ARGS}}
 
-# full local gate before pushing: lint + tests + corpus accuracy + build
-check: lint test burst-accuracy build
+# guard: the lens helper must be EXECUTABLE in the composed bundle, in the zips,
+# AND after `just install` (a plain byte-copy dropped the +x bit and the plugin
+# could not run the helper). Depends on `build` so output/dist exists.
+check-exec: build
+    bash build/check-exec.sh
+
+# full local gate before pushing: lint + tests + corpus accuracy + build + exec guard
+check: lint test burst-accuracy build check-exec
 
 # Remove EVERYTHING generated — the output/ tree (bundle + pulled deps), the Go
 # helper's cross-compiled binaries, and coverage artifacts.

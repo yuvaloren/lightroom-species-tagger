@@ -126,6 +126,15 @@ end
 
 local function copy_file( from, to )
 	write_file( to, read_file( from ) ) -- binary-safe (covers .png)
+	-- Preserve the source's executable bit. write_file creates the copy with the
+	-- default 0644, which silently breaks any binary in the tree — the lens
+	-- helper installed by `--install` (copytree) landed non-executable, so the
+	-- plugin could not run it at all (no hash, every Tag failed instantly). lfs
+	-- can't chmod, so shell out, but only when the source is actually +x.
+	local perms = lfs.attributes( from, 'permissions' ) -- e.g. 'rwxr-xr-x'
+	if perms and perms:sub( 3, 3 ) == 'x' then
+		run( string.format( 'chmod +x %q', to ) )
+	end
 end
 
 local function mkdirp( path )
