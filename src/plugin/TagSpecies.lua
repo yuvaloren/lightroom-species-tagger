@@ -34,6 +34,7 @@ local LrPathUtils = import 'LrPathUtils'
 local LrFileUtils = import 'LrFileUtils'
 
 local Config = require 'Config'
+local PhotoMeta = require 'PhotoMeta'
 local SelectedName = require 'SelectedName'
 local KeywordApply = require 'KeywordApply'
 local Burst = require 'Burst'
@@ -49,11 +50,6 @@ local log = Log.new( 'SpeciesTagger' )
 -- helpers
 
 local tmpCounter = 0
-
-local function fileName( photo )
-	local ok, name = pcall( function() return photo:getFormattedMetadata( 'fileName' ) end )
-	return ok and name or '(photo)'
-end
 
 -- Render a downsized JPEG of the photo into memory. requestJpegThumbnail is async; we
 -- wait (cooperatively) for its callback.
@@ -162,23 +158,22 @@ function M.run( _ )
 	local items = {} -- selection order; each { id, photo, file|false, err, t, serial, label }
 	for i, photo in ipairs( photos ) do
 		if progress:isCanceled() then break end
-		progress:setCaption( string.format( 'Preparing %s (%d of %d)', fileName( photo ), i, #photos ) )
+		-- PhotoMeta calls the SDK getters BARE — they yield (catalog read access),
+		-- and a yield cannot cross a plain pcall in Lua 5.1. The pcall wrappers
+		-- that used to sit here failed on every call because of that, which
+		-- silently untimed every frame and broke burst grouping in the field
+		-- (see shared/PhotoMeta.lua and photometa_spec.lua).
+		local meta = PhotoMeta.read( photo, cfg.burstDetect )
+		progress:setCaption( string.format( 'Preparing %s (%d of %d)', meta.label, i, #photos ) )
 		progress:setPortionComplete( i - 1, #photos )
 
-		local it = { id = i, photo = photo, label = fileName( photo ), file = false }
+		local it = { id = i, photo = photo, label = meta.label, t = meta.t, serial = meta.serial, file = false }
 		local bytes, err = jpegBytes( photo, cfg.maxEdge )
 		if not bytes then
 			it.err = err
 		else
 			local file, werr = writeTempJpeg( bytes )
 			if file then it.file = file else it.err = werr end
-		end
-
-		if cfg.burstDetect then
-			local okT, tv = pcall( function() return photo:getRawMetadata( 'dateTimeOriginal' ) end )
-			if okT and type( tv ) == 'number' then it.t = tv end
-			local okS, sv = pcall( function() return photo:getFormattedMetadata( 'cameraSerialNumber' ) end )
-			if okS and type( sv ) == 'string' and sv ~= '' then it.serial = sv end
 		end
 		items[ i ] = it
 	end
