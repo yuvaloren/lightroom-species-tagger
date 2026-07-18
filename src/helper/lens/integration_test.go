@@ -101,6 +101,19 @@ const clickSkip = "<script>setTimeout(function(){try{var b=document.getElementBy
 // binary injecting a fixed name.) The helper must ignore it and keep waiting.
 const blindTag = "<script>setTimeout(function(){try{window.__stTag='Quercus robur';}catch(e){}},300);</script>"
 
+// reflowThenTag simulates Google Lens's SPA behaviour: after the page loads
+// (overlay injected) it WIPES document.body — dropping our Tag bar the way a
+// client-side re-render does — then waits for the helper to put the bar BACK
+// before selecting a name and pressing Tag. If the helper only injects the
+// overlay on document load (never re-injects), the bar never returns, the tag
+// never fires, and the run times out. The closure survives the innerHTML wipe.
+const reflowThenTag = "<script>setTimeout(function(){try{" +
+	"document.body.innerHTML='<span id=__sp_reflow>Antennarius commerson</span>';" +
+	"var iv=setInterval(function(){var b=document.getElementById('__lens_tag');if(b){clearInterval(iv);" +
+	"var el=document.getElementById('__sp_reflow');var r=document.createRange();r.selectNodeContents(el);" +
+	"var s=window.getSelection();s.removeAllRanges();s.addRange(r);b.click();}},100);" +
+	"}catch(e){}},600);</script>"
+
 func startFakeGoogle(t *testing.T) *fakeGoogle {
 	t.Helper()
 	f := &fakeGoogle{}
@@ -179,6 +192,8 @@ func startFakeGoogle(t *testing.T) *fakeGoogle {
 			inject = blindTag
 		case q.Get("skip") == "1":
 			inject = clickSkip
+		case q.Get("reflow") == "1":
+			inject = reflowThenTag
 		}
 		out := string(html)
 		if inject != "" {
@@ -461,6 +476,27 @@ func TestVerificationInterstitialStillTags(t *testing.T) {
 	name, _ := r["name"].(string)
 	if r["ok"] != true || !strings.Contains(strings.ToLower(name), "antennarius") {
 		t.Fatalf("a verification page before the results broke tagging (overlay lost?): %v", r)
+	}
+}
+
+// The Tag/Skip bar must be present no matter what the page does. Google Lens is
+// a single-page app that re-renders after load and can wipe DOM-appended nodes
+// like our bar, so injecting only on document load isn't enough — the helper has
+// to keep the bar alive during the wait. Here the page wipes its own body after
+// load; the bar must come back (re-injected) so the user can still tag.
+func TestOverlayReinjectedAfterDomWipe(t *testing.T) {
+	f := startFakeGoogle(t)
+	cache := newCacheDir(t)
+	img := tmpImage(t, "x")
+
+	r := runHelper(t, cache, map[string]string{
+		"LENS_TEST_URL":            f.srv.URL + "/results?reflow=1",
+		"LENS_INTERACTIVE_TIMEOUT": "15000",
+	}, img, 150*time.Second)
+
+	name, _ := r["name"].(string)
+	if r["ok"] != true || !strings.Contains(strings.ToLower(name), "antennarius") {
+		t.Fatalf("Tag bar was not re-injected after the page wiped it: %v", r)
 	}
 }
 

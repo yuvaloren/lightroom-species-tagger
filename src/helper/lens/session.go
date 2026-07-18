@@ -531,12 +531,13 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		obj, err := client.Evaluate(cctx, session,
-			"({tag: window.__stTag || null, skip: window.__stSkip || null})", true)
+			"({tag: window.__stTag || null, skip: window.__stSkip || null, bar: !!document.getElementById('__lens_assist')})", true)
 		cancel()
 		if err == nil && obj != nil {
 			var s struct {
 				Tag  *string `json:"tag"`
 				Skip *string `json:"skip"`
+				Bar  bool    `json:"bar"`
 			}
 			if json.Unmarshal(obj.Value, &s) == nil {
 				if name, ok := acceptTag(s.Tag, nonce); ok {
@@ -544,6 +545,17 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 				}
 				if s.Skip != nil && *s.Skip == nonce {
 					return "skip", ""
+				}
+				if !s.Bar {
+					// The Tag/Skip bar is ALWAYS present, no matter what the page
+					// does. Google Lens is an SPA that re-renders after load and can
+					// wipe DOM-appended nodes; the overlay's on-new-document
+					// injection only covers full document loads. So whenever the bar
+					// is gone we put it straight back — the injector self-guards, so
+					// this is a no-op once it's there.
+					ictx, icancel := context.WithTimeout(ctx, 10*time.Second)
+					_, _ = client.Evaluate(ictx, session, overlaySource(cfg.Pos, nonce), true)
+					icancel()
 				}
 			}
 		}
