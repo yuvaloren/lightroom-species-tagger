@@ -2,6 +2,7 @@ require 'support.fixtures'
 local TagRun = require 'TagRun'
 
 local CANCELLED = '__cancelled__'
+local ABORTED = '__aborted__'
 
 -- Build N items with rendered files, in selection order.
 local function items( n, opts )
@@ -28,6 +29,7 @@ local function recorder( tagResults )
 	local rec = { tagCalls = {}, applied = {} }
 	rec.deps = {
 		cancelled = CANCELLED,
+		aborted = ABORTED,
 		tag = function( file, pos )
 			rec.tagCalls[ #rec.tagCalls + 1 ] = { file = file, pos = pos }
 			local r = tagResults and tagResults[ #rec.tagCalls ]
@@ -113,19 +115,59 @@ describe( 'TagRun.run — the loop blocks on and consumes each tag result', func
 		assert.equal( 2, out.skipped )
 	end )
 
-	it( 'a helper error on a cluster leaves it untouched (distinct from a Skip)', function()
-		local r = recorder { { err = 'chrome missing' }, nil }
+	it( 'a helper error ABORTS the whole run — only Tag or Skip may advance', function()
+		-- A non-decision outcome (the helper failed) is not a Skip: it means no
+		-- identification page was resolved. The run must STOP, never silently move
+		-- on to the next cluster's page.
+		local r = recorder { { err = 'chrome missing' }, nil } -- cluster1 errors; cluster2 would tag
 		local out = TagRun.run {
 			items = items( 4 ), cfg = baseCfg(),
 			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
 			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
-			tag = r.deps.tag, cancelled = r.deps.cancelled,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
 			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
 		}
-		assert.equal( 1, #r.applied )
-		assert.same( { 3, 4 }, r.applied[ 1 ].ids )
-		assert.equal( 2, out.skipped )
-		assert.truthy( out.lines[ 1 ]:match( 'not tagged' ) ) -- error, not "skipped"
+		assert.equal( 1, #r.tagCalls ) -- cluster 2 is NEVER shown
+		assert.equal( 0, #r.applied )
+		assert.is_true( out.aborted )
+		assert.equal( 0, out.applied )
+		assert.truthy( out.lines[ 1 ]:match( 'stopped' ) )
+	end )
+
+	it( 'a closed Chrome window (abort sentinel) stops the whole run', function()
+		-- deps.aborted is the errKind tag() returns when the user closed the Lens
+		-- window (or the wait timed out). The run must abort and the NEXT cluster's
+		-- page must never be shown.
+		local r = recorder { { err = ABORTED }, nil } -- cluster1 = window closed; cluster2 would tag
+		local out = TagRun.run {
+			items = items( 4 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
+		}
+		assert.equal( 1, #r.tagCalls ) -- cluster 2's tag NEVER called
+		assert.equal( 0, #r.applied )
+		assert.is_true( out.aborted )
+		assert.truthy( out.lines[ 1 ]:match( 'window' ) ) -- names the window-close cause
+	end )
+
+	it( 'aborts mid-run: earlier tagged clusters are kept, later ones are dropped', function()
+		-- cluster 1 tags fine; cluster 2 aborts (window closed); cluster 3 must
+		-- never be reached. What was applied before the abort stays applied.
+		local r = recorder { 'Sula nebouxii', { err = ABORTED }, nil }
+		local out = TagRun.run {
+			items = items( 6 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 }, { 5, 6 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve, applyCluster = r.deps.applyCluster,
+		}
+		assert.equal( 2, #r.tagCalls ) -- reached cluster 2, then stopped
+		assert.equal( 1, #r.applied ) -- cluster 1 kept
+		assert.same( { 1, 2 }, r.applied[ 1 ].ids )
+		assert.equal( 2, out.applied )
+		assert.is_true( out.aborted )
 	end )
 
 	it( 'a GBIF miss leaves the cluster untouched', function()

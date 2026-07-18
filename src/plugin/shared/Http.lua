@@ -19,6 +19,11 @@ local M = {}
 -- user pressed Skip, so the caller leaves the photo untouched without treating it as an error.
 M.LENS_CANCELLED = '__lens_cancelled__'
 
+-- A distinct sentinel the assist path returns when NO decision was made on a photo — the
+-- user closed the Chrome window, or the (long) wait timed out. Unlike a Skip, this stops the
+-- WHOLE run: the rule is that the next identification page is shown only after a Tag or Skip.
+M.LENS_ABORTED = '__lens_aborted__'
+
 local function toLrHeaders( headers )
 	if not headers then return nil end
 	local arr = {}
@@ -188,11 +193,13 @@ end
 -- Interpret the helper's decoded stdout (`d`) — or a runHelper error (`err`) — into the
 -- tag() contract (name | nil,errString). Pure: no I/O, so it's unit-testable via _test.
 --   * runHelper failed          -> (nil, err)
+--   * { aborted = true }         -> (nil, LENS_ABORTED)    [window closed / timed out; stop the run]
 --   * { cancelled = true }       -> (nil, LENS_CANCELLED)  [user pressed Skip; not an error]
 --   * { ok = true, name = 's' }  -> (s)
 --   * anything else              -> (nil, 'Google Lens assist: <error|nothing was tagged>')
 local function interpretTagResult( d, err )
 	if not d then return nil, err end
+	if type( d ) == 'table' and d.aborted then return nil, M.LENS_ABORTED end
 	if type( d ) == 'table' and d.cancelled then return nil, M.LENS_CANCELLED end
 	if type( d ) ~= 'table' or not d.ok or type( d.name ) ~= 'string' or d.name == '' then
 		return nil, 'Google Lens assist: ' .. ( d and tostring( d.error ) or 'nothing was tagged' )

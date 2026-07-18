@@ -68,9 +68,12 @@ type Config struct {
 // FromEnv builds the config the way lens-search.js read process.env/argv.
 func FromEnv(args []string) Config {
 	cfg := Config{
-		Pos:          strings.TrimSpace(os.Getenv("LENS_ASSIST_POS")),
-		Close:        os.Getenv("LENS_ASSIST_CLOSE") == "1",
-		Timeout:      180 * time.Second,
+		Pos:   strings.TrimSpace(os.Getenv("LENS_ASSIST_POS")),
+		Close: os.Getenv("LENS_ASSIST_CLOSE") == "1",
+		// A long backstop, not a working timeout: a run ends when the user tags/
+		// skips every photo or CLOSES the window (which aborts). A short default
+		// would abort a whole run over one slowly-identified photo.
+		Timeout:      1800 * time.Second,
 		TestURL:      os.Getenv("LENS_TEST_URL"),
 		TestUpload:   os.Getenv("LENS_TEST_UPLOAD_URL"),
 		TestHeadless: os.Getenv("LENS_TEST_HEADLESS") == "1",
@@ -97,12 +100,18 @@ type Result struct {
 	Name      string `json:"name,omitempty"`
 	Cancelled bool   `json:"cancelled,omitempty"`
 	Closed    bool   `json:"closed,omitempty"`
-	Error     string `json:"error,omitempty"`
+	// Aborted marks a run that STOPPED because no decision was made on this photo
+	// — the user closed the Chrome window, or the (long) wait timed out. Distinct
+	// from Cancelled (a Skip, which advances) and from Closed (the close command's
+	// own success). The Lua side turns this into LENS_ABORTED and halts the run.
+	Aborted bool   `json:"aborted,omitempty"`
+	Error   string `json:"error,omitempty"`
 }
 
-func fail(msg string) Result { return Result{OK: false, Error: msg} }
-func skipped() Result        { return Result{OK: false, Cancelled: true} }
-func tagged(n string) Result { return Result{OK: true, Name: n} }
+func fail(msg string) Result    { return Result{OK: false, Error: msg} }
+func skipped() Result           { return Result{OK: false, Cancelled: true} }
+func aborted(msg string) Result { return Result{OK: false, Aborted: true, Error: msg} }
+func tagged(n string) Result    { return Result{OK: true, Name: n} }
 
 func (c Config) dbg(a ...any) {
 	if c.Debug {
@@ -168,8 +177,11 @@ func Run(cfg Config) Result {
 		return tagged(name)
 	case "skip":
 		return skipped()
-	default:
-		return fail("no species tagged (timed out waiting for a selection)")
+	case "closed":
+		// The user closed the Chrome window mid-run: abort, don't advance.
+		return aborted("the Chrome window was closed — run stopped")
+	default: // "timeout"
+		return aborted("timed out waiting for a selection — run stopped")
 	}
 }
 
@@ -468,16 +480,32 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 }
 
 // waitForTag polls the page for the user's Tag (window.__stTag) or Skip
-// (window.__stSkip), or times out. Polling page globals — not exposeFunction —
-// is what lets the helper reconnect to a reused window across photos.
+// (window.__stSkip), detects the user closing the Chrome window, or times out.
+// Polling page globals — not exposeFunction — is what lets the helper reconnect
+// to a reused window across photos.
 //
 // The overlay writes "<nonce>|<name>" for a Tag and the nonce for a Skip; a
 // value that doesn't carry THIS photo's nonce is a blind/stale write (the fixed
 // debug port lets any local process forge one) and is ignored, so the wait
-// continues until a genuine tokened press or the timeout.
+// continues until a genuine tokened press.
+//
+// Close detection has two signals. Closing the whole window kills the
+// browser-level socket, so client.Done() fires ("closed"). Closing just the
+// assist tab (or the window in a build that keeps the browser process alive)
+// leaves the socket up but removes the page target, so a GetTargets that lists
+// NO page target means the user closed it — confirmed twice in a row so a single
+// transient read can never false-abort a live run. Either way the outcome is
+// "closed", which aborts the whole run rather than silently advancing.
 func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config, nonce string) (string, string) {
 	deadline := time.Now().Add(cfg.Timeout)
+	pageGone := 0
 	for time.Now().Before(deadline) {
+		select {
+		case <-client.Done(): // the browser went away — user closed the window
+			return "closed", ""
+		default:
+		}
+
 		cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
 		obj, err := client.Evaluate(cctx, session,
 			"({tag: window.__stTag || null, skip: window.__stSkip || null})", true)
@@ -496,14 +524,52 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 				}
 			}
 		}
+
+		// Tab-close detection: a clean GetTargets with no page target means the
+		// user closed the assist tab. Two consecutive confirmations guard against
+		// a transient read during navigation (a GetTargets error is inconclusive,
+		// not a miss). An Evaluate error alone is NOT enough — it also happens
+		// mid-navigation — so we corroborate with the target list.
+		if err != nil {
+			if noPageTarget(ctx, client) {
+				pageGone++
+				if pageGone >= 2 {
+					return "closed", ""
+				}
+			} else {
+				pageGone = 0
+			}
+		} else {
+			pageGone = 0
+		}
+
 		// mid-navigation evaluate errors: just try again, like the JS catch
 		select {
 		case <-client.Done():
-			return "timeout", ""
+			return "closed", ""
 		case <-time.After(300 * time.Millisecond):
 		}
 	}
 	return "timeout", ""
+}
+
+// noPageTarget reports whether the browser currently lists NO page target — the
+// user closed the assist tab/window. A GetTargets error is inconclusive
+// (transient / mid-teardown) and reported as false, so only a clean empty result
+// counts; whole-browser death is caught separately by client.Done().
+func noPageTarget(ctx context.Context, client *cdp.Client) bool {
+	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	targets, err := client.GetTargets(cctx)
+	if err != nil {
+		return false
+	}
+	for _, t := range targets {
+		if t.Type == "page" {
+			return false
+		}
+	}
+	return true
 }
 
 // acceptTag validates a polled window.__stTag against this photo's nonce and

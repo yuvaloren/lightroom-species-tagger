@@ -199,6 +199,7 @@ function M.run( _ )
 		hashFiles = hashFiles,
 		tag = assist.tag,
 		cancelled = Http.LENS_CANCELLED,
+		aborted = Http.LENS_ABORTED,
 		resolve = function( name ) return SelectedName.resolve( name, resolveDeps, keyCfg ) end,
 		applyCluster = function( members, plan )
 			local undoLabel = #members > 1
@@ -231,10 +232,19 @@ function M.run( _ )
 	assist.close() -- shut the reused window down cleanly (no "didn't shut down correctly" prompt)
 	progress:done()
 
-	local bezel = string.format( 'Species Tagger: tagged %d%s',
-		out.applied, out.skipped > 0 and ( ', skipped ' .. out.skipped ) or '' )
+	local tally = string.format( 'tagged %d%s', out.applied,
+		out.skipped > 0 and ( ', skipped ' .. out.skipped ) or '' )
+	local bezel
+	if out.aborted then
+		-- The user closed the Chrome window (or the wait timed out): the run
+		-- stopped early; whatever was tagged before the stop was kept.
+		bezel = string.format( 'Species Tagger stopped — %s. %s so far.',
+			out.abortReason or 'the run was interrupted', tally )
+	else
+		bezel = 'Species Tagger: ' .. tally
+	end
 	log:info( 'assist run complete — ' .. bezel .. '\n' .. table.concat( out.lines, '\n' ) )
-	LrDialogs.showBezel( bezel, 4 )
+	LrDialogs.showBezel( bezel, out.aborted and 6 or 4 )
 end
 
 return M

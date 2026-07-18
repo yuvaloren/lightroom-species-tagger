@@ -533,6 +533,117 @@ func TestDetachedLifecycle(t *testing.T) {
 	}
 }
 
+// ---- window-close aborts the whole run -----------------------------------------
+
+// The user closing the Chrome window mid-run must ABORT the helper (ok:false,
+// aborted:true) — NOT silently time out into a skip and NOT hang. We run the
+// helper against a page that never tags, then concurrently close the assist
+// page target (the user closing the window), and assert the helper returns
+// promptly with an abort that NAMES the window as the cause. The interactive
+// timeout is set well above the time the close needs, so a run that only
+// stopped because it timed out (the pre-fix behavior, or a broken detector)
+// would report the timeout message instead and fail this test.
+func TestWindowCloseAborts(t *testing.T) {
+	f := startFakeGoogle(t)
+	cache := newCacheDir(t)
+	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
+
+	done := make(chan map[string]any, 1)
+	go func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 150*time.Second)
+		defer rcancel()
+		cmd := exec.CommandContext(rctx, helperBin, img)
+		cmd.Env = append(os.Environ(),
+			"LENS_TEST_HEADLESS=1", "LENS_DEBUG=1",
+			"LENS_CACHE_DIR="+cache,
+			"LENS_TEST_URL="+f.srv.URL+"/results", // no tag/skip: the run waits
+			"LENS_INTERACTIVE_TIMEOUT=60000",      // 60s: far longer than a close needs
+		)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		_ = cmd.Run()
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			t.Logf("close-abort helper stderr: %s", s)
+		}
+		var res map[string]any
+		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+		_ = json.Unmarshal([]byte(strings.TrimSpace(lines[len(lines)-1])), &res)
+		done <- res
+	}()
+
+	// Connect a second CDP client to the same window the helper launched.
+	ctx := context.Background()
+	var client *cdp.Client
+	for i := 0; i < 200; i++ {
+		time.Sleep(100 * time.Millisecond)
+		p, err := readDevToolsActivePort(filepath.Join(cache, "chrome-profile-assist"))
+		if err != nil {
+			continue
+		}
+		if c, err := connect(ctx, p); err == nil {
+			client = c
+			break
+		}
+	}
+	if client == nil {
+		t.Fatal("assist window never came up")
+	}
+	defer client.Close()
+
+	// Wait until the assist page is genuinely up with the overlay present, so we
+	// close AFTER the run is waiting on the user — not mid-load.
+	var pageID string
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		targets, err := client.GetTargets(ctx)
+		if err == nil {
+			pageID = ""
+			for _, tt := range targets {
+				if tt.Type == "page" {
+					pageID = tt.TargetID
+				}
+			}
+		}
+		if pageID != "" {
+			if s, err := client.AttachToTarget(ctx, pageID); err == nil {
+				ectx, cancel := context.WithTimeout(ctx, 3*time.Second)
+				obj, err := client.Evaluate(ectx, s, "!!document.getElementById('__lens_tag')", true)
+				cancel()
+				if err == nil && obj != nil && string(obj.Value) == "true" {
+					break
+				}
+			}
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if pageID == "" {
+		t.Fatal("assist page never appeared")
+	}
+
+	// The user closes the window.
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err := client.CloseTarget(cctx, pageID)
+	cancel()
+	if err != nil {
+		t.Fatalf("closing the assist tab: %v", err)
+	}
+
+	select {
+	case res := <-done:
+		if res["ok"] != false || res["aborted"] != true {
+			t.Fatalf("closing the window did not abort the run: %v", res)
+		}
+		if res["cancelled"] == true {
+			t.Fatalf("a window close was mis-reported as a Skip: %v", res)
+		}
+		if msg, _ := res["error"].(string); !strings.Contains(strings.ToLower(msg), "window") {
+			t.Fatalf("abort did not name the window as the cause (was it a timeout?): %v", res)
+		}
+	case <-time.After(90 * time.Second):
+		t.Fatal("helper never returned after the window was closed")
+	}
+}
+
 // ---- T4: the trusted-click regression test (port of overlay-selection.test.js) --
 
 // A REAL mouse press on the Tag button must not collapse the user's text

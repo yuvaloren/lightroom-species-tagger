@@ -64,6 +64,12 @@ describe( 'Http._test.interpretTagResult (helper stdout -> tag() contract)', fun
 		assert.is_nil( name )
 		assert.equal( Http.LENS_CANCELLED, err )
 	end )
+	it( 'maps an aborted result to the LENS_ABORTED sentinel (window closed / timed out)', function()
+		local name, err = T.interpretTagResult( { ok = false, aborted = true,
+			error = 'the Chrome window was closed' } )
+		assert.is_nil( name )
+		assert.equal( Http.LENS_ABORTED, err )
+	end )
 	it( 'surfaces the helper error message when a tag failed', function()
 		local name, err = T.interpretTagResult( { ok = false, error = 'no species tagged' } )
 		assert.is_nil( name )

@@ -21,6 +21,8 @@ func TestResultEncoding(t *testing.T) {
 		{fail("no species tagged (timed out waiting for a selection)"),
 			`{"ok":false,"error":"no species tagged (timed out waiting for a selection)"}`},
 		{Result{OK: true, Closed: true}, `{"ok":true,"closed":true}`},
+		{aborted("the Chrome window was closed — run stopped"),
+			`{"ok":false,"aborted":true,"error":"the Chrome window was closed — run stopped"}`},
 	}
 	for _, c := range cases {
 		got, err := json.Marshal(c.res)
@@ -40,8 +42,12 @@ func TestFromEnvDefaults(t *testing.T) {
 		t.Setenv(k, "")
 	}
 	cfg := FromEnv([]string{"/tmp/photo.jpg"})
+	// The default wait is a long backstop, not a working timeout: the user ends a
+	// run by tagging/skipping each photo or by CLOSING the window (which aborts).
+	// A short default would abort a whole run just because someone pondered one
+	// hard ID, so the timeout is generous (30 min) and window-close is the signal.
 	if cfg.Img != "/tmp/photo.jpg" || cfg.Close ||
-		cfg.Timeout != 180*time.Second || cfg.TestHeadless || cfg.Debug {
+		cfg.Timeout != 1800*time.Second || cfg.TestHeadless || cfg.Debug {
 		t.Errorf("defaults wrong: %+v", cfg)
 	}
 	if !strings.Contains(cfg.CacheDir, "speciestagger-lens") {
@@ -63,9 +69,9 @@ func TestFromEnvOverrides(t *testing.T) {
 		cfg.Timeout != 2500*time.Millisecond || !cfg.TestHeadless {
 		t.Errorf("overrides wrong: %+v", cfg)
 	}
-	// A garbage timeout falls back to the default, like parseInt(...) || 180000.
+	// A garbage timeout falls back to the default (the long 30-min backstop).
 	t.Setenv("LENS_INTERACTIVE_TIMEOUT", "banana")
-	if cfg = FromEnv(nil); cfg.Timeout != 180*time.Second {
+	if cfg = FromEnv(nil); cfg.Timeout != 1800*time.Second {
 		t.Errorf("garbage timeout not defaulted: %v", cfg.Timeout)
 	}
 }

@@ -13,10 +13,11 @@
 //	LENS_HASH=1 LENS_HASH_LIST=<f>   dHash every image listed in <f> (burst
 //	                                 detection; local only — no Chrome)
 //
-// Output (stdout): { ok:true, name } | { ok:false, cancelled|error } |
-// { ok:true, closed:true } | { ok:true, hashes:[...] }. ALWAYS exit 0 — the
-// Lua caller reads the JSON, not the exit code (see src/plugin/shared/Http.lua
-// runHelper).
+// Output (stdout): { ok:true, name } | { ok:false, cancelled } (Skip) |
+// { ok:false, aborted:true, error } (window closed / timed out — stop the run) |
+// { ok:false, error } | { ok:true, closed:true } | { ok:true, hashes:[...] }.
+// ALWAYS exit 0 — the Lua caller reads the JSON, not the exit code (see
+// src/plugin/shared/Http.lua runHelper).
 package main
 
 import (

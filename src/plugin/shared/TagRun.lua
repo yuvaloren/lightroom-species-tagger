@@ -12,7 +12,10 @@ The invariants below are what the spec pins:
   * `tag` is called ONCE per cluster, on the cluster's representative frame —
     never once per photo;
   * the loop is synchronous on `tag` (it consumes the return value before moving
-    on — Skip/error/timeout leave the WHOLE cluster untouched);
+    on): the next identification page is shown ONLY after the user Tags or Skips
+    the current one;
+  * a non-decision — the user closed the Chrome window, the wait timed out, or
+    the helper failed — ABORTS the whole run rather than silently advancing;
   * a tagged cluster's keywords are applied to EVERY member, in one write.
 
 run( deps ) -> summary
@@ -26,16 +29,20 @@ run( deps ) -> summary
                     is on and there is more than one item. nil => no grouping.
   deps.tag          function(file, pos) -> name|nil, errKind   BLOCKS on the user.
   deps.cancelled    the errKind value `tag` returns for a user Skip (not an error).
+  deps.aborted      the errKind value `tag` returns when the user closed the Lens
+                    window (or the wait timed out) — a non-decision that stops the run.
   deps.resolve      function(name) -> { ok, taxon = { scientificName, commonName }, plan }
   deps.applyCluster function(memberItems[], plan) -> nil  (caller wraps ONE undo).
   deps.onClusterDone optional function(memberItems[]) -> nil  (e.g. free temp files).
   deps.progress     optional { canceled()->bool, caption(str), portion(done,total) }
   deps.log          optional { info(str), warn(str) }
 
-returns { applied, skipped, clusters, tagFiles = { file, … }, lines = { … } }
+returns { applied, skipped, clusters, tagFiles = { file, … }, lines = { … },
+          aborted = <bool>, abortReason = <string|nil> }
   tagFiles is the ordered list of files actually handed to `tag` — its length is
   the number of Lens reads, which MUST equal the cluster count, not the photo
-  count. The spec asserts exactly that.
+  count. The spec asserts exactly that. `aborted` is true when a non-decision
+  stopped the run early (clusters after the abort point are left untouched).
 ------------------------------------------------------------------------------]]
 
 local M = {}
@@ -105,6 +112,7 @@ function M.run( deps )
 	-- ── assist loop: ONE tag per cluster, applied to every member ─────────────
 	local applied, skipped = 0, 0
 	local lines, tagFiles = {}, {}
+	local aborted, abortReason = false, nil
 
 	for k, cl in ipairs( clusters ) do
 		if progress.canceled() then break end
@@ -122,17 +130,12 @@ function M.run( deps )
 				and string.format( 'Burst %d of %d — %d photos', k, #clusters, #cl )
 				or string.format( 'Photo %d of %d', k, #clusters )
 
-			-- BLOCKS until the user Tags a selection (or Skips / times out).
+			-- BLOCKS until the user Tags a selection, Skips, closes the window, or
+			-- the wait times out.
 			tagFiles[ #tagFiles + 1 ] = rep.file
 			local name, aerr = deps.tag( rep.file, pos )
 
-			if not name then
-				skipped = skipped + #cl
-				local why = ( aerr == deps.cancelled ) and 'skipped'
-					or ( 'not tagged (' .. tostring( aerr ) .. ')' )
-				lines[ #lines + 1 ] = '⊘ ' .. repLabel .. moreSuffix( #cl ) .. ' — ' .. why
-				if aerr ~= deps.cancelled then log.warn( 'assist: ' .. tostring( aerr ) ) end
-			else
+			if name then
 				local res = deps.resolve( name )
 				if res and res.ok then
 					local members = {}
@@ -146,8 +149,23 @@ function M.run( deps )
 					lines[ #lines + 1 ] = '⊘ ' .. repLabel .. moreSuffix( #cl ) ..
 						' — “' .. tostring( name ) .. '” not found in GBIF'
 				end
+			elseif aerr == deps.cancelled then
+				-- Skip: this cluster is untouched, but the run continues.
+				skipped = skipped + #cl
+				lines[ #lines + 1 ] = '⊘ ' .. repLabel .. moreSuffix( #cl ) .. ' — skipped'
+			else
+				-- No decision was made (window closed, timed out, or the helper
+				-- failed). Only a Tag or Skip may advance, so STOP the whole run
+				-- rather than silently show the next cluster's page.
+				abortReason = ( aerr == deps.aborted ) and 'the Chrome window was closed'
+					or ( 'the identifier failed (' .. tostring( aerr ) .. ')' )
+				lines[ #lines + 1 ] = '■ ' .. repLabel .. moreSuffix( #cl ) .. ' — run stopped: ' .. abortReason
+				log.warn( 'assist run stopped: ' .. abortReason )
+				aborted = true
 			end
 		end
+
+		if aborted then break end
 
 		if deps.onClusterDone then
 			local members = {}
@@ -162,6 +180,8 @@ function M.run( deps )
 		clusters = #clusters,
 		tagFiles = tagFiles,
 		lines = lines,
+		aborted = aborted,
+		abortReason = abortReason,
 	}
 end
 
