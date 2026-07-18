@@ -19,8 +19,10 @@ The run has three phases:
 
 The plugin never reads or scrapes Google's results — it uses only the text the
 user highlighted (see src/helper/ and src/plugin/shared/SelectedName.lua). This
-is the only file that talks to the Lightroom catalog; the decision logic lives
-in the pure, unit-tested shared modules.
+is the only file that talks to the Lightroom catalog; the ORCHESTRATION (cluster
+→ one Lens read per burst, block on the user's Tag, apply to every member) is the
+pure, unit-tested shared/TagRun.lua — this file only renders the photos and
+supplies TagRun the real effects (render, hash, GBIF resolve, catalog write).
 ------------------------------------------------------------------------------]]
 
 local LrApplication = import 'LrApplication'
@@ -35,6 +37,7 @@ local Config = require 'Config'
 local SelectedName = require 'SelectedName'
 local KeywordApply = require 'KeywordApply'
 local Burst = require 'Burst'
+local TagRun = require 'TagRun'
 local Http = require 'Http'
 local Log = require 'Log'
 
@@ -157,149 +160,85 @@ function M.run( _ )
 	local progress = LrProgressScope { title = 'Tag species with Lens…' }
 	progress:setCancelable( true )
 
-	-- ── Phase 1: gather — render every photo once, read burst metadata ────────
-	local rec = {}    -- i -> { photo, file|nil, err|nil }
-	local frames = {} -- Burst.cluster input, id = selection index
+	-- ── Gather: render every photo once, read burst metadata (LR I/O) ─────────
+	-- The orchestration itself (cluster → one Lens read per burst, block on the
+	-- user's Tag, apply to every member) is the pure, unit-tested TagRun module;
+	-- everything below just supplies the real effects it calls.
+	local items = {} -- selection order; each { id, photo, file|false, err, t, serial, label }
 	for i, photo in ipairs( photos ) do
 		if progress:isCanceled() then break end
 		progress:setCaption( string.format( 'Preparing %s (%d of %d)', fileName( photo ), i, #photos ) )
 		progress:setPortionComplete( i - 1, #photos )
 
-		local r = { photo = photo }
+		local it = { id = i, photo = photo, label = fileName( photo ), file = false }
 		local bytes, err = jpegBytes( photo, cfg.maxEdge )
 		if not bytes then
-			r.err = err
+			it.err = err
 		else
 			local file, werr = writeTempJpeg( bytes )
-			if file then r.file = file else r.err = werr end
+			if file then it.file = file else it.err = werr end
 		end
-		rec[ i ] = r
 
-		local t, serial
 		if cfg.burstDetect then
 			local okT, tv = pcall( function() return photo:getRawMetadata( 'dateTimeOriginal' ) end )
-			if okT and type( tv ) == 'number' then t = tv end
+			if okT and type( tv ) == 'number' then it.t = tv end
 			local okS, sv = pcall( function() return photo:getFormattedMetadata( 'cameraSerialNumber' ) end )
-			if okS and type( sv ) == 'string' and sv ~= '' then serial = sv end
+			if okS and type( sv ) == 'string' and sv ~= '' then it.serial = sv end
 		end
-		frames[ i ] = { id = i, t = t, serial = serial } -- hash filled in below
+		items[ i ] = it
 	end
-	local gathered = #frames
 
-	-- one helper call fingerprints all renders (hash mode: local, no Chrome)
-	if cfg.burstDetect and gathered > 1 and not progress:isCanceled() then
-		progress:setCaption( 'Detecting bursts…' )
-		local list = {}
-		for i = 1, gathered do list[ i ] = rec[ i ].file or '' end
-		local listFile = writeTempList( list )
-		if listFile then
-			local hashes, herr = assist.hash( listFile, gathered )
-			LrFileUtils.delete( listFile )
-			if hashes then
-				for i = 1, gathered do
-					if hashes[ i ] then frames[ i ].hash = hashes[ i ] end
-				end
-			else
-				-- no hashes -> every frame stays a singleton (the old behavior)
-				log:warn( 'burst hashing unavailable: ' .. Log.redact( tostring( herr ) ) )
+	-- Fingerprint all renders in one helper call (hash mode: local, no Chrome).
+	local function hashFiles( files )
+		local listFile = writeTempList( files )
+		if not listFile then return nil end
+		local hashes = assist.hash( listFile, #files )
+		LrFileUtils.delete( listFile )
+		return hashes
+	end
+
+	local out = TagRun.run {
+		items = items,
+		cfg = cfg,
+		cluster = Burst.cluster,
+		hashFiles = hashFiles,
+		tag = assist.tag,
+		cancelled = Http.LENS_CANCELLED,
+		resolve = function( name ) return SelectedName.resolve( name, resolveDeps, keyCfg ) end,
+		applyCluster = function( members, plan )
+			local undoLabel = #members > 1
+				and string.format( 'Tag species (%d photos)', #members ) or 'Tag species'
+			catalog:withWriteAccessDo( undoLabel, function()
+				for _, m in ipairs( members ) do KeywordApply.apply( catalog, m.photo, plan, cfg ) end
+			end, { timeout = 30 } )
+		end,
+		onClusterDone = function( members ) -- free the disk as each burst finishes
+			for _, m in ipairs( members ) do
+				if m.file then LrFileUtils.delete( m.file ); m.file = false end
 			end
-		end
-	end
+		end,
+		progress = {
+			canceled = function() return progress:isCanceled() end,
+			caption = function( s ) progress:setCaption( s ) end,
+			portion = function( d, t ) progress:setPortionComplete( d, t ) end,
+		},
+		log = {
+			info = function( s ) log:info( s ) end,
+			warn = function( s ) log:warn( Log.redact( s ) ) end,
+		},
+	}
 
-	-- ── Phase 2: cluster (pure) ───────────────────────────────────────────────
-	local clusters
-	if cfg.burstDetect then
-		clusters = Burst.cluster( frames, { gapSeconds = cfg.burstGapSeconds } )
-		local plan = {}
-		for k, cl in ipairs( clusters ) do
-			local names = {}
-			for _, i in ipairs( cl ) do names[ #names + 1 ] = fileName( rec[ i ].photo ) end
-			plan[ #plan + 1 ] = string.format( '  burst %d (%d photo%s): %s',
-				k, #cl, #cl == 1 and '' or 's', table.concat( names, ' ' ) )
-		end
-		log:info( 'burst plan — ' .. #clusters .. ' group(s) from ' .. gathered .. ' photo(s)\n'
-			.. table.concat( plan, '\n' ) )
-	else
-		clusters = {}
-		for i = 1, gathered do clusters[ i ] = { i } end
-	end
-
-	-- ── Phase 3: assist loop, one Lens read per cluster ───────────────────────
-	local nApplied, nSkipped = 0, 0
-	local lines = {}
-	local function moreSuffix( cl )
-		return #cl > 1 and ( ' +' .. ( #cl - 1 ) .. ' more' ) or ''
-	end
-
-	for k, cl in ipairs( clusters ) do
-		if progress:isCanceled() then break end
-		progress:setPortionComplete( k - 1, #clusters )
-		local r = rec[ cl[ 1 ] ] -- representative: first frame by capture time
-		progress:setCaption( fileName( r.photo ) )
-
-		if not r.file then
-			nSkipped = nSkipped + #cl
-			lines[ #lines + 1 ] = '✗ ' .. fileName( r.photo ) .. moreSuffix( cl ) .. ' — ' .. tostring( r.err )
-			log:warn( 'render failed: ' .. Log.redact( tostring( r.err ) ) )
-		else
-			local pos
-			if #cl > 1 then
-				pos = string.format( 'Burst %d of %d — %d photos', k, #clusters, #cl )
-			else
-				pos = string.format( 'Photo %d of %d', k, #clusters )
-			end
-			-- opens/reuses the window; blocks until the user Tags a selection (or Skips / times out)
-			local name, aerr = assist.tag( r.file, pos )
-
-			if not name then
-				-- Skipped, timed out, or a helper error: leave the whole cluster untouched.
-				nSkipped = nSkipped + #cl
-				local why = ( aerr == Http.LENS_CANCELLED ) and 'skipped'
-					or ( 'not tagged (' .. tostring( aerr ) .. ')' )
-				lines[ #lines + 1 ] = '⊘ ' .. fileName( r.photo ) .. moreSuffix( cl ) .. ' — ' .. why
-				if aerr ~= Http.LENS_CANCELLED then log:warn( 'assist: ' .. Log.redact( tostring( aerr ) ) ) end
-			else
-				local res = SelectedName.resolve( name, resolveDeps, keyCfg )
-				if res.ok then
-					local undoLabel = #cl > 1
-						and string.format( 'Tag species (%d photos)', #cl ) or 'Tag species'
-					catalog:withWriteAccessDo( undoLabel, function()
-						for _, i in ipairs( cl ) do
-							KeywordApply.apply( catalog, rec[ i ].photo, res.plan, cfg )
-						end
-					end, { timeout = 30 } )
-					nApplied = nApplied + #cl
-					lines[ #lines + 1 ] = string.format( '✓ %s%s — %s (%s)', fileName( r.photo ),
-						moreSuffix( cl ), res.taxon.commonName or res.taxon.scientificName,
-						res.taxon.scientificName )
-				else
-					nSkipped = nSkipped + #cl
-					lines[ #lines + 1 ] = '⊘ ' .. fileName( r.photo ) .. moreSuffix( cl ) ..
-						' — “' .. tostring( name ) .. '” not found in GBIF'
-				end
-			end
-		end
-
-		-- this cluster is done with its renders — free the disk as we go
-		for _, i in ipairs( cl ) do
-			if rec[ i ].file then
-				LrFileUtils.delete( rec[ i ].file )
-				rec[ i ].file = nil
-			end
-		end
-	end
-
-	-- cancel mid-run leaves later clusters' renders behind: sweep them
-	for i = 1, gathered do
-		if rec[ i ].file then LrFileUtils.delete( rec[ i ].file ) end
+	-- Cancel mid-run leaves later bursts' renders behind: sweep them.
+	for _, it in ipairs( items ) do
+		if it.file then LrFileUtils.delete( it.file ) end
 	end
 
 	assist.close() -- shut the reused window down cleanly (no "didn't shut down correctly" prompt)
 	progress:done()
 
 	local bezel = string.format( 'Species Tagger: tagged %d%s',
-		nApplied, nSkipped > 0 and ( ', skipped ' .. nSkipped ) or '' )
-	log:info( 'assist run complete — ' .. bezel .. '\n' .. table.concat( lines, '\n' ) )
+		out.applied, out.skipped > 0 and ( ', skipped ' .. out.skipped ) or '' )
+	log:info( 'assist run complete — ' .. bezel .. '\n' .. table.concat( out.lines, '\n' ) )
 	LrDialogs.showBezel( bezel, 4 )
 end
 
