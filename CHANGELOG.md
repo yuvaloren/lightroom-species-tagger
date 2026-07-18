@@ -10,13 +10,16 @@ All notable changes to this project are documented here. The format is based on
 
 - Automatic burst detection: near-identical frames shot within a configurable gap
   (default 1 s) are grouped, and one Google Lens identification tags the whole
-  burst — Tag, Skip, and Undo act on the group. Detection is fully local
-  (capture times + a perceptual fingerprint computed by the bundled helper); a
-  labelled corpus of real bursts gates the clustering in CI on zero false merges.
+  burst — Tag, Skip, and Undo act on the group.
+- Highlight snapping: your selection cleans itself the moment you release the
+  mouse, before you press Tag, so you see the corrected highlight. Parentheses,
+  quotes, commas and stray spaces fall off the edges, and a half-selected word
+  completes to its boundaries — so catching a "(" or missing the first letter no
+  longer sends the wrong text to be identified.
 
 ### Changed
 
-- Reduced the plugin size substantially — the macOS download drops from ~90 MB to ~5 MB and the all-platforms package from ~112 MB to ~11 MB. Tagging works exactly as before: install, identify a species, write the keywords, uninstall.
+- Reduced the plugin size substantially.
 
 ## [0.3.0] - 2026-07-10
 
