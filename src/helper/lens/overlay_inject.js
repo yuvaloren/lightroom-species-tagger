@@ -24,6 +24,53 @@ only: the same guard keeps it out of a same-origin reCAPTCHA iframe.
 function assistOverlayInjector(pos, token) {
   if (window.top !== window.self) return;
   token = token || '';
+
+  // ── selection snapping ──────────────────────────────────────────────────────
+  // Highlighting a name by hand is fiddly: it's easy to catch a parenthesis or
+  // miss the first/last letters. The moment the mouse is released we clean the
+  // live selection IN PLACE — so the user sees the corrected highlight before
+  // pressing Tag: characters that can't be part of a name (parentheses, quotes,
+  // commas, whitespace) are dropped from the edges, then a partially selected
+  // word is completed to its boundaries. Interior text is never touched, and a
+  // selection with nothing name-like in it is left alone. Tag also snaps once,
+  // synchronously, so a keyboard-made selection gets the same treatment.
+  // NAMECH: what a species name is made of — letters in any script (Chrome's
+  // regexes know Unicode property classes), combining marks, digits, and the
+  // hyphens/apostrophes of common names ("Blue-footed", "Randall’s").
+  var NAMECH = /[\p{L}\p{M}\p{N}'’-]/u;
+  var snapSelection = function () {
+    var s = window.getSelection ? window.getSelection() : null;
+    if (!s || s.rangeCount !== 1 || s.isCollapsed) return;
+    var r = s.getRangeAt(0);
+    var sc = r.startContainer, ec = r.endContainer;
+    // Drag selections start and end in text nodes; anything else (triple-click
+    // block selections land on elements) is deliberate — leave it alone.
+    if (sc.nodeType !== Node.TEXT_NODE || ec.nodeType !== Node.TEXT_NODE) return;
+    var so = r.startOffset, eo = r.endOffset;
+    // 1. shrink: drop non-name characters at the edges (each edge stays within
+    //    its own text node — the 99% case for a drag over words).
+    while (so < sc.data.length && !NAMECH.test(sc.data.charAt(so)) && !(sc === ec && so >= eo)) so++;
+    while (eo > 0 && !NAMECH.test(ec.data.charAt(eo - 1)) && !(sc === ec && eo <= so)) eo--;
+    if (sc === ec && so >= eo) return; // nothing name-like inside: not ours to fix
+    // 2. grow: complete a partially selected word at either end.
+    while (so > 0 && NAMECH.test(sc.data.charAt(so - 1))) so--;
+    while (eo < ec.data.length && NAMECH.test(ec.data.charAt(eo))) eo++;
+    if (so === r.startOffset && eo === r.endOffset) return; // already clean
+    var nr = document.createRange();
+    nr.setStart(sc, so);
+    nr.setEnd(ec, eo);
+    s.removeAllRanges();
+    s.addRange(nr);
+  };
+  // One listener per document, no matter how often the SPA-wipe watchdog
+  // re-runs this injector (listeners on `document` survive a body wipe). The
+  // deferral lets the browser finish building the selection for every gesture
+  // (drag, double-click, shift-click) before we look at it.
+  if (!window.__stSnapWired) {
+    window.__stSnapWired = 1;
+    document.addEventListener('mouseup', function () { setTimeout(snapSelection, 0); });
+  }
+
   var add = function () {
     if (!document.body || document.getElementById('__lens_assist')) return;
     var bar = document.createElement('div');
@@ -64,6 +111,7 @@ function assistOverlayInjector(pos, token) {
     tagBtn.onmousedown = function ( e ) { e.preventDefault(); };
     tagBtn.onclick = function () {
       if (tagBtn.disabled) return;
+      snapSelection(); // same cleanup for selections the mouseup path didn't see (keyboard)
       var sel = (window.getSelection ? String(window.getSelection()) : '').replace(/^\s+|\s+$/g, '');
       if (!sel) {
         // nothing highlighted yet — nudge instead of doing nothing silently

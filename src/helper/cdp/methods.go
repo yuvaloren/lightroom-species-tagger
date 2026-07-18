@@ -135,6 +135,16 @@ func (c *Client) DispatchMouseEvent(ctx context.Context, session, typ string, x,
 		map[string]any{"type": typ, "x": x, "y": y, "button": button, "clickCount": clickCount}, nil)
 }
 
+// DispatchMouseMoved sends a trusted mouse move with the left button held
+// (buttons=1) — the middle of a drag gesture (test harness only). Chrome
+// extends the text selection on these, exactly like a human dragging across a
+// species name; DispatchMouseEvent can't express the held button, and without
+// it a move is a hover, not a drag.
+func (c *Client) DispatchMouseMoved(ctx context.Context, session string, x, y float64) error {
+	return c.Call(ctx, session, "Input.dispatchMouseEvent",
+		map[string]any{"type": "mouseMoved", "x": x, "y": y, "button": "left", "buttons": 1}, nil)
+}
+
 // BrowserClose asks the browser to shut down cleanly (the LENS_ASSIST_CLOSE
 // path — Chrome records a Normal exit, so no restore-pages bubble).
 func (c *Client) BrowserClose(ctx context.Context) error {

@@ -728,6 +728,165 @@ func TestWindowCloseAborts(t *testing.T) {
 	}
 }
 
+// ---- selection snapping: a sloppy highlight self-corrects on mouse release ------
+
+// Highlighting a species name by hand is fiddly: it's easy to catch a
+// parenthesis or miss the first/last letters. The overlay must clean the
+// selection THE MOMENT the mouse is released — before Tag is pressed — so the
+// user SEES the corrected highlight: non-name characters (parentheses, quotes,
+// commas, spaces) are dropped from the edges, and a partially selected word is
+// completed to its boundaries. Both directions are exercised with REAL drag
+// gestures (trusted CDP press → move → release), because only a real drag makes
+// the browser build the selection and fire mouseup the way a human does. Then a
+// trusted Tag click must carry the snapped name.
+func TestSelectionSnapsToSpeciesName(t *testing.T) {
+	cache := newCacheDir(t)
+	profile := filepath.Join(cache, "chrome-profile-assist")
+	if err := os.MkdirAll(profile, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	launch := append([]string{
+		"--remote-debugging-port=0",
+		"--user-data-dir=" + profile,
+		"--no-first-run", "--no-default-browser-check", "--lang=en-US",
+	}, headlessTestFlags...)
+	launch = append(launch, "about:blank")
+	if err := chrome.SpawnDetached(chrome.Find(), launch); err != nil {
+		t.Fatal(err)
+	}
+	ctx := context.Background()
+	var client *cdp.Client
+	for i := 0; i < 100; i++ {
+		time.Sleep(100 * time.Millisecond)
+		p, err := readDevToolsActivePort(profile)
+		if err != nil {
+			continue
+		}
+		if c, err := connect(ctx, p); err == nil {
+			client = c
+			break
+		}
+	}
+	if client == nil {
+		t.Fatal("could not reach the test Chrome")
+	}
+	defer func() {
+		cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
+		_ = client.BrowserClose(cctx)
+		cancel()
+		client.Close()
+	}()
+
+	session, err := newPage(ctx, client, Config{Debug: true})
+	if err != nil {
+		t.Fatal(err)
+	}
+	cctx, cancel := context.WithTimeout(ctx, 120*time.Second)
+	defer cancel()
+	// One text node, real page text shape: common name, then the binomial in
+	// parentheses — the exact thing users highlight (and mis-highlight).
+	if err := client.Navigate(cctx, session,
+		"data:text/html,<p id=host style=font-size:20px>Blue-footed booby (Sula nebouxii) in flight</p>"); err != nil {
+		t.Fatal(err)
+	}
+	waitTrue(t, cctx, client, session, "!!document.body")
+	const tok = "snapnonce"
+	if _, err := client.Evaluate(cctx, session, overlaySource("", tok), true); err != nil {
+		t.Fatal(err)
+	}
+	waitTrue(t, cctx, client, session, "!!document.getElementById('__lens_tag')")
+
+	// caretX(i): page coordinates of the boundary BEFORE character i of the
+	// host text node, plus the line's vertical center — drag anchor points.
+	caret := func(i int) (float64, float64) {
+		t.Helper()
+		obj, err := client.Evaluate(cctx, session, fmt.Sprintf(`(function(){
+			var tn = document.getElementById('host').firstChild;
+			var r = document.createRange(); r.setStart(tn,%d); r.setEnd(tn,%d);
+			var b = r.getBoundingClientRect();
+			return JSON.stringify({x:b.left, y:(b.top+b.bottom)/2});
+		})()`, i, i+1), true)
+		if err != nil {
+			t.Fatal(err)
+		}
+		var s string
+		_ = json.Unmarshal(obj.Value, &s)
+		var p struct{ X, Y float64 }
+		if err := json.Unmarshal([]byte(s), &p); err != nil {
+			t.Fatalf("caret rect: %v (%s)", err, s)
+		}
+		return p.X, p.Y
+	}
+	drag := func(x1, y1, x2, y2 float64) {
+		t.Helper()
+		if err := client.DispatchMouseEvent(cctx, session, "mousePressed", x1, y1, "left", 1); err != nil {
+			t.Fatal(err)
+		}
+		for _, f := range []float64{0.4, 0.8, 1} {
+			if err := client.DispatchMouseMoved(cctx, session, x1+(x2-x1)*f, y1+(y2-y1)*f); err != nil {
+				t.Fatal(err)
+			}
+		}
+		if err := client.DispatchMouseEvent(cctx, session, "mouseReleased", x2, y2, "left", 1); err != nil {
+			t.Fatal(err)
+		}
+	}
+	selectionIs := func(want string) {
+		t.Helper()
+		waitTrue(t, cctx, client, session,
+			fmt.Sprintf("String(window.getSelection())===%q", want))
+	}
+
+	const text = "Blue-footed booby (Sula nebouxii) in flight"
+	iSula := strings.Index(text, "Sula")    // 19
+	iNeb := strings.Index(text, "nebouxii") // 24
+	iOpen := strings.Index(text, "(")       // 18
+	iClose := strings.Index(text, ")")      // 32
+
+	// 1. UNDERSHOOT: start inside "Sula", stop inside "nebouxii" — both words
+	// must complete to their boundaries on release.
+	x1, y1 := caret(iSula + 2)
+	x2, y2 := caret(iNeb + 5)
+	drag(x1, y1, x2, y2)
+	selectionIs("Sula nebouxii")
+
+	// 2. OVERSHOOT: start on the space before "(", stop past ")" — the
+	// parentheses and outer whitespace must fall off on release.
+	x1, y1 = caret(iOpen - 1)
+	x2, y2 = caret(iClose + 1)
+	drag(x1, y1, x2, y2)
+	selectionIs("Sula nebouxii")
+
+	// 3. A trusted Tag click carries the snapped name.
+	obj, err := client.Evaluate(cctx, session,
+		`JSON.stringify(document.getElementById('__lens_tag').getBoundingClientRect())`, true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var rectJSON string
+	_ = json.Unmarshal(obj.Value, &rectJSON)
+	var rect struct{ X, Y, Width, Height float64 }
+	if err := json.Unmarshal([]byte(rectJSON), &rect); err != nil {
+		t.Fatalf("rect: %v (%s)", err, rectJSON)
+	}
+	cx, cy := rect.X+rect.Width/2, rect.Y+rect.Height/2
+	if err := client.DispatchMouseEvent(cctx, session, "mousePressed", cx, cy, "left", 1); err != nil {
+		t.Fatal(err)
+	}
+	if err := client.DispatchMouseEvent(cctx, session, "mouseReleased", cx, cy, "left", 1); err != nil {
+		t.Fatal(err)
+	}
+	obj, err = client.Evaluate(cctx, session, "window.__stTag || null", true)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var tag string
+	_ = json.Unmarshal(obj.Value, &tag)
+	if want := tok + "|Sula nebouxii"; tag != want {
+		t.Errorf("Tag did not carry the snapped selection: __stTag=%q, want %q", tag, want)
+	}
+}
+
 // ---- T4: the trusted-click regression test (port of overlay-selection.test.js) --
 
 // A REAL mouse press on the Tag button must not collapse the user's text
