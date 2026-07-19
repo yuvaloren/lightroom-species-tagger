@@ -13,6 +13,11 @@ keywords to the photo.
 | [![Download for macOS](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20Download%20for%20macOS-Installer%20(.pkg)-blue?style=for-the-badge)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-mac.pkg) | Apple Silicon **and** Intel — one installer |
 | [![Download for Windows](https://img.shields.io/badge/%E2%AC%87%EF%B8%8F%20Download%20for%20Windows-Installer%20(.exe)-blue?style=for-the-badge)](https://github.com/yuvaloren/lightroom-species-tagger/releases/latest/download/SpeciesTagger-win-setup.exe) | Windows 10/11 (x64 and ARM) |
 
+<!-- The line below is stamped by build/sync-wiki.sh from the latest release tag. -->
+Latest version: **{{VERSION}}**, released {{RELEASE_DATE}} — see the
+[changelog](https://github.com/yuvaloren/lightroom-species-tagger/blob/main/CHANGELOG.md)
+for what's new.
+
 Run the downloaded installer — that's the whole install. No admin password, nothing to
 configure, no Plug-in Manager steps. You need **Adobe Lightroom Classic** and **Google
 Chrome** installed. (Prefer a manual install? See [[Installing]].)

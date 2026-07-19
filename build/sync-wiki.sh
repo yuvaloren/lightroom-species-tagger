@@ -42,7 +42,17 @@ git clone --quiet --depth 1 "$WIKI_REMOTE" "$TMP/wiki" 2>/dev/null \
 W="$TMP/wiki"
 
 # ---- authored wiki pages (the user-facing docs live here now) -------------------
-cp wiki/Home.md "$W/Home.md"
+# Home carries a "latest version" line. The newest v* tag is the source of truth
+# for what is released — the VERSION file can't be: it is already X.Y.(Z+1)-dev
+# whenever this script is run by hand for a wiki fix.
+LATEST_TAG="$(git tag --list 'v*' --sort=-v:refname | head -n 1)"
+[ -n "$LATEST_TAG" ] || die "no v* release tag found — cannot stamp Home's version line"
+REL_DATE="$(git log -1 --format=%cs "$LATEST_TAG")"
+grep -q '{{VERSION}}' wiki/Home.md \
+	|| die "wiki/Home.md has no {{VERSION}} placeholder — restore the version line or update build/sync-wiki.sh"
+sed -e "s/{{VERSION}}/${LATEST_TAG#v}/g" -e "s/{{RELEASE_DATE}}/$REL_DATE/g" \
+	wiki/Home.md > "$W/Home.md"
+! grep -q '{{' "$W/Home.md" || die "unsubstituted {{...}} placeholder left in Home.md"
 cp wiki/_Sidebar.md "$W/_Sidebar.md"
 cp wiki/FAQ.md "$W/FAQ.md"
 cp wiki/Privacy.md "$W/Privacy.md"
