@@ -303,6 +303,45 @@ local function remove_existing( path )
 	return lfs.symlinkattributes( path, 'mode' ) == nil
 end
 
+-- An install must always ENABLE the plug-in: Lightroom remembers a disabled
+-- plug-in (by id AND by path) in its preferences and would otherwise apply
+-- that remembered state to the copy just installed — the plug-in silently
+-- vanishes from Plug-in Extras (guarded by build/check-install-enables.sh).
+-- The prefs surgery lives in the lens helper (`lens-helper enable-installed`)
+-- so this installer, the macOS pkg, and the NSIS exe share ONE implementation.
+-- ST_LR_HELPER overrides the binary (the check harness runs a native build —
+-- the composed bundle ships no Linux helper). Best-effort by design: the
+-- helper always exits 0, and a missing helper only logs — a stale disabled
+-- flag must never fail an install.
+local function enable_installed( dest )
+	local isWin = package.config:sub( 1, 1 ) == '\\'
+	local helper = os.getenv( 'ST_LR_HELPER' )
+	if not helper or helper == '' then
+		local keys = isWin and { 'win-x64', 'win-arm64' }
+			or { 'darwin-universal', 'darwin-arm64', 'darwin-x64' }
+		local bin = isWin and 'lens-helper.exe' or 'lens-helper'
+		for _, key in ipairs( keys ) do
+			local cand = dest .. '/helper/' .. key .. '/' .. bin
+			if exists( cand ) then helper = cand break end
+		end
+	end
+	if not helper then
+		log( 'WARNING: no lens helper under ' .. dest ..
+			' — could not clear a remembered "disabled" state; if the plug-in shows disabled, enable it in Plug-in Manager' )
+		return
+	end
+	if isWin then helper = helper:gsub( '/', '\\' ) end
+	-- Tolerant on purpose (NOT run(), which die()s): on a host that can run
+	-- none of the bundled helpers — Linux CI installing a mac/win bundle —
+	-- the exec fails, and that must not fail the install itself.
+	local a, b, c = os.execute( string.format( '%q enable-installed %q', helper, dest ) )
+	local ok = ( a == true ) or ( a == 0 ) or ( b == 'exit' and c == 0 )
+	if not ok then
+		log( 'WARNING: ' .. helper .. ' could not run on this machine' ..
+			' — if the plug-in shows disabled, enable it in Plug-in Manager' )
+	end
+end
+
 local function do_install()
 	local dir = install_dir()
 	mkdirp( dir )
@@ -320,6 +359,7 @@ local function do_install()
 		copytree( target, dest ) -- a full standalone copy — no symlink back into the repo
 		installed[ #installed + 1 ] = dest
 		log( 'installed (copy) ' .. dest )
+		enable_installed( dest )
 	end
 	log( '' )
 	log( 'In Lightroom Classic — File \226\150\184 Plug-in Manager:' )

@@ -86,6 +86,28 @@ exit 0
 SH
 chmod +x "$TMP/scripts/preinstall"
 
+# An install must always ENABLE the plug-in: Lightroom remembers a disabled
+# plug-in (by id AND by path) in its CC7 defaults and would otherwise keep the
+# fresh install disabled (the wiki used to document this as a gotcha to fix by
+# hand). The lens helper owns the prefs surgery (`enable-installed` — shared
+# with build.lua --install and the NSIS exe); it goes through defaults(1), and
+# this script runs as the installing user (currentUserHome domain), so the
+# right per-user prefs are edited. Best-effort: never fail the install.
+cat > "$TMP/scripts/postinstall" <<'SH'
+#!/bin/sh
+[ -n "$2" ] || exit 0
+P="$2/SpeciesTagger.lrplugin"
+for key in darwin-universal darwin-arm64 darwin-x64; do
+	H="$P/helper/$key/lens-helper"
+	if [ -x "$H" ]; then
+		"$H" enable-installed "$P" || true
+		break
+	fi
+done
+exit 0
+SH
+chmod +x "$TMP/scripts/postinstall"
+
 pkgbuild --analyze --root "$TMP/root" "$TMP/component.plist" >/dev/null
 /usr/bin/python3 - "$TMP/component.plist" <<'PY'
 import plistlib, sys

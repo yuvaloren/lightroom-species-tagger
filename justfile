@@ -101,8 +101,14 @@ burst-accuracy *ARGS: _deps
 check-exec: build
     bash build/check-exec.sh
 
+# guard: an install must always ENABLE the plug-in — Lightroom's remembered
+# disabled state (by plugin id AND by path) is cleared for the copy being
+# installed, and nothing else in the prefs is touched.
+check-install-enables: build
+    bash build/check-install-enables.sh
+
 # full local gate before pushing: lint + tests + corpus accuracy + build + exec guard
-check: lint test burst-accuracy build check-exec
+check: lint test burst-accuracy build check-exec check-install-enables
 
 # Remove EVERYTHING generated — the output/ tree (bundle + pulled deps), the Go
 # helper's cross-compiled binaries, and coverage artifacts.

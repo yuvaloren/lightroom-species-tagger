@@ -78,6 +78,19 @@ Section "Species Tagger"
 		File /r /x "win-arm64" "${PAYLOAD}\*.*"
 	${EndIf}
 
+	; An install must always ENABLE the plug-in: Lightroom remembers a
+	; disabled plug-in (by id AND by path) in its CC 7 preferences file and
+	; would otherwise keep this fresh install disabled. The lens helper owns
+	; the prefs surgery ("enable-installed" -- one implementation shared with
+	; build.lua --install and the macOS pkg postinstall). Best-effort: the
+	; helper always exits 0, and a failure must never fail the install.
+	${If} ${IsNativeARM64}
+		nsExec::ExecToLog '"$INSTDIR\helper\win-arm64\lens-helper.exe" enable-installed "$INSTDIR"'
+	${Else}
+		nsExec::ExecToLog '"$INSTDIR\helper\win-x64\lens-helper.exe" enable-installed "$INSTDIR"'
+	${EndIf}
+	Pop $0
+
 	WriteUninstaller "$INSTDIR\Uninstall.exe"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayName" "Species Tagger for Lightroom Classic"
 	WriteRegStr HKCU "${UNINST_KEY}" "DisplayVersion" "${VERSION}"

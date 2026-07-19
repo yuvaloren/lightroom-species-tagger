@@ -12,6 +12,10 @@
 //	LENS_ASSIST_CLOSE=1 lens-helper  close the reused window cleanly
 //	LENS_HASH=1 LENS_HASH_LIST=<f>   dHash every image listed in <f> (burst
 //	                                 detection; local only — no Chrome)
+//	lens-helper enable-installed <p> installer hook: clear Lightroom's
+//	                                 remembered "disabled" state for the
+//	                                 plug-in copy at <p> (see lrprefs);
+//	                                 human-readable output, not JSON
 //
 // Output (stdout): { ok:true, name } | { ok:false, cancelled } (Skip) |
 // { ok:false, aborted:true, error } (window closed / timed out — stop the run) |
@@ -27,9 +31,15 @@ import (
 
 	"github.com/yuvaloren/lightroom-species-tagger/helper/imghash"
 	"github.com/yuvaloren/lightroom-species-tagger/helper/lens"
+	"github.com/yuvaloren/lightroom-species-tagger/helper/lrprefs"
 )
 
 func main() {
+	// Installer hook — runs outside Lightroom, so it speaks install-log prose
+	// instead of the one-JSON-line contract the Lua caller reads.
+	if len(os.Args) == 3 && os.Args[1] == "enable-installed" {
+		os.Exit(lrprefs.CmdEnableInstalled(os.Args[2]))
+	}
 	var res any
 	if os.Getenv("LENS_HASH") == "1" {
 		// Hash mode is pixels-only: it must never reach Chrome/CDP (that

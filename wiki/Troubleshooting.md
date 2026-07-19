@@ -1,11 +1,16 @@
 # Troubleshooting
 
 ### The plug-in shows as disabled after installing
-If a copy of Species Tagger was ever installed on this machine before (for example a
-manual unzip added through Plug-in Manager), Lightroom remembers its disabled/enabled
-state and can apply it to the newly installed copy. Open **File ▸ Plug-in Manager**,
-select **Species Tagger**, and click **Enable**. One-time fix; fresh machines are not
-affected.
+Since 0.4.1 the installers (`.pkg`, `.exe`, and `just install`) clear any
+disabled state Lightroom remembered for the copy being installed, so this
+should no longer happen. If you still see it:
+
+- **Lightroom was running during the install.** Lightroom rewrites its
+  preferences when it quits and can restore the old disabled flag. Quit
+  Lightroom, run the installer again, then start Lightroom.
+- **Manual zip install.** Unzipping by hand runs no installer, so nothing
+  clears the remembered state. Open **File ▸ Plug-in Manager**, select
+  **Species Tagger**, and click **Enable** — a one-time fix.
 
 ### How do I uninstall?
 - **Windows:** Settings ▸ Apps ▸ **Species Tagger for Lightroom Classic** ▸ Uninstall.
