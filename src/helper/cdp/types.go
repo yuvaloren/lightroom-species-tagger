@@ -39,11 +39,23 @@ type RemoteObject struct {
 	ObjectID string          `json:"objectId"`
 }
 
-// FrameNavigatedParams is Page.frameNavigated's payload (subset).
+// FrameNavigatedParams is Page.frameNavigated's payload (subset). An empty
+// ParentID marks the main frame; LoaderID identifies the committed document.
 type FrameNavigatedParams struct {
 	Frame struct {
 		ID       string `json:"id"`
 		ParentID string `json:"parentId"`
+		LoaderID string `json:"loaderId"`
 		URL      string `json:"url"`
 	} `json:"frame"`
+}
+
+// LifecycleEventParams is Page.lifecycleEvent's payload (needs
+// Page.setLifecycleEventsEnabled). Name is e.g. "DOMContentLoaded" or "load";
+// LoaderID says WHICH document's lifecycle it is — the disambiguation
+// Page.domContentEventFired lacks.
+type LifecycleEventParams struct {
+	FrameID  string `json:"frameId"`
+	LoaderID string `json:"loaderId"`
+	Name     string `json:"name"`
 }

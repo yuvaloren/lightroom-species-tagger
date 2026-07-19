@@ -20,9 +20,10 @@ if [[ "$(uname)" == "Darwin" ]]; then
 	if ! command -v brew >/dev/null 2>&1; then
 		say "Homebrew not found. Install it from https://brew.sh then re-run."; exit 1
 	fi
-	command -v just      >/dev/null 2>&1 || { say "installing just";      brew install just; }
-	command -v git-cliff >/dev/null 2>&1 || { say "installing git-cliff"; brew install git-cliff; }
-	command -v go        >/dev/null 2>&1 || { say "installing go";        brew install go; }
+	command -v just       >/dev/null 2>&1 || { say "installing just";       brew install just; }
+	command -v git-cliff  >/dev/null 2>&1 || { say "installing git-cliff";  brew install git-cliff; }
+	command -v go         >/dev/null 2>&1 || { say "installing go";         brew install go; }
+	command -v shellcheck >/dev/null 2>&1 || { say "installing shellcheck"; brew install shellcheck; }
 fi
 
 # --- hererocks: builds a local Lua + LuaRocks without touching the system Lua.

@@ -25,9 +25,9 @@ import (
 	"github.com/yuvaloren/lightroom-species-tagger/helper/chrome"
 )
 
-// overlayJS is the assistive control bar, byte-identical to the old
-// overlay_inject.js (single source of truth — the trusted-click
-// regression test drives THIS copy). It declares assistOverlayInjector(pos)
+// overlayJS is the assistive control bar (overlay_inject.js in this package —
+// the single source of truth; the trusted-click regression test drives THIS
+// copy). It declares assistOverlayInjector(pos)
 // and ends with a CommonJS export, so injection wraps it in an IIFE with a
 // local `module` shim.
 //
@@ -157,12 +157,14 @@ func Run(cfg Config) Result {
 		return fail("assist failed: " + err.Error())
 	}
 	// Per-photo nonce: the overlay tags as "<nonce>|<name>", and waitForTag
-	// accepts a Tag only when the nonce matches. The assist window's debug port
-	// is fixed and predictable, so a local process can connect and blind-write
-	// window.__stTag to forge a Tag (seen in the wild); without the nonce that
-	// forged value would be accepted and the plugin would "auto-tag" without ever
-	// waiting for the user. The nonce is minted here and injected into the page,
-	// so a blind writer can't produce it.
+	// accepts a Tag only when the nonce matches. Chrome picks the debug port
+	// (--remote-debugging-port=0), but it's still discoverable: the profile's
+	// DevToolsActivePort file is readable by every local process running as the
+	// user, and one that connects can blind-write window.__stTag to forge a Tag
+	// (seen in the wild); without the nonce that forged value would be accepted
+	// and the plugin would "auto-tag" without ever waiting for the user. The
+	// nonce is minted here and injected into the page, so a blind writer can't
+	// produce it.
 	nonce := newNonce()
 	if err := prepPage(ctx, client, session, cfg, nonce); err != nil {
 		return fail("assist failed: " + err.Error())
@@ -246,7 +248,8 @@ func readDevToolsActivePort(profile string) (int, error) {
 
 // connectOrLaunch reuses the assist window recorded in the profile's
 // DevToolsActivePort file, or launches a detached one and polls the file up
-// (100 × 100 ms). Chrome picks its own free port (--remote-debugging-port=0):
+// (300 × 100 ms — a cold Chrome start on a slow disk or an AV-scanned Windows
+// can take well past 10 s). Chrome picks its own free port (--remote-debugging-port=0):
 // a fixed well-known port could be squatted by another process — blocking the
 // launch entirely — or spoofed; with port 0 neither is possible and concurrent
 // runs (two catalogs, two users) can't collide.
@@ -278,7 +281,7 @@ func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
 	if err := chrome.SpawnDetached(chromePath, args); err != nil {
 		return nil, fmt.Errorf("could not start the assist Chrome window: %s", err)
 	}
-	for i := 0; i < 100; i++ {
+	for i := 0; i < 300; i++ {
 		time.Sleep(100 * time.Millisecond)
 		port, err := readDevToolsActivePort(profile)
 		if err != nil {
@@ -365,22 +368,39 @@ func overlaySource(pos, token string) string {
 		"\nassistOverlayInjector(" + posJSON + "," + string(tokJSON) + ");})();"
 }
 
-// goTo navigates and waits (bounded) for DOMContentLoaded; navigation errors
-// and timeouts are swallowed exactly like the JS `.catch(() => {})` — the
-// caller decides success from the page state, not the navigation promise.
+// goTo navigates and waits (bounded) for the DOMContentLoaded OF THAT
+// navigation; navigation errors and timeouts are swallowed exactly like the JS
+// `.catch(() => {})` — the caller decides success from the page state, not the
+// navigation promise.
+//
+// The wait matches lifecycle events against the navigation's own loaderId, so
+// a stray DOMContentLoaded from a PREVIOUS document (the initial about:blank,
+// a late-arriving warm-up) can never release it early — Page.domContentEventFired
+// carries no loaderId and was exactly that race.
 func goTo(ctx context.Context, client *cdp.Client, session, url string, timeout time.Duration) {
-	sub := client.Subscribe("Page.domContentEventFired", session)
+	sub := client.Subscribe("Page.lifecycleEvent", session)
 	defer sub.Close()
 	nctx, cancel := context.WithTimeout(ctx, 60*time.Second)
-	err := client.Navigate(nctx, session, url)
+	loaderID, err := client.Navigate(nctx, session, url)
 	cancel()
-	if err != nil {
+	if err != nil || loaderID == "" {
+		// Failed, or a same-document navigation — nothing further will fire.
 		return
 	}
-	select {
-	case <-sub.C:
-	case <-time.After(timeout):
-	case <-client.Done():
+	deadline := time.After(timeout)
+	for {
+		select {
+		case raw := <-sub.C:
+			var ev cdp.LifecycleEventParams
+			if json.Unmarshal(raw, &ev) == nil &&
+				ev.LoaderID == loaderID && ev.Name == "DOMContentLoaded" {
+				return
+			}
+		case <-deadline:
+			return
+		case <-client.Done():
+			return
+		}
 	}
 }
 
@@ -443,20 +463,46 @@ func uploadInBrowser(ctx context.Context, client *cdp.Client, session string, cf
 		return fmt.Errorf("could not build the Lens upload form")
 	}
 
-	// Submit + wait for the results navigation (mirrors the JS Promise.all of
-	// waitForNavigation(domcontentloaded, 60s).catch + form.submit()).
-	sub := client.Subscribe("Page.domContentEventFired", session)
+	// Submit + wait for the results navigation. The submit is a top-level
+	// navigation we did not start via Page.navigate, so its loaderId isn't known
+	// up front: subscribe to frameNavigated (the commit, which carries the new
+	// loaderId) AND lifecycleEvent BEFORE submitting, then wait for the first
+	// main-frame commit and THAT document's DOMContentLoaded. Matching by
+	// loaderId means a late event from the warm-up document can never release
+	// this wait early; the seenDCL stash covers the select picking the DCL off
+	// its channel before the commit that names it (channel order across two subs
+	// is not the arrival order).
+	navSub := client.Subscribe("Page.frameNavigated", session)
+	lifeSub := client.Subscribe("Page.lifecycleEvent", session)
+	defer navSub.Close()
+	defer lifeSub.Close()
 	if _, err := client.Evaluate(cctx, session,
 		"document.getElementById('__stUploadForm').submit()", true); err != nil {
-		sub.Close()
 		return fmt.Errorf("could not build the Lens upload form")
 	}
-	select {
-	case <-sub.C:
-	case <-time.After(60 * time.Second):
-	case <-client.Done():
+	deadline := time.After(60 * time.Second)
+	loaderID := ""
+	seenDCL := map[string]bool{}
+	for done := false; !done; {
+		select {
+		case raw := <-navSub.C:
+			var ev cdp.FrameNavigatedParams
+			if json.Unmarshal(raw, &ev) == nil && ev.Frame.ParentID == "" && ev.Frame.LoaderID != "" {
+				loaderID = ev.Frame.LoaderID
+				done = seenDCL[loaderID]
+			}
+		case raw := <-lifeSub.C:
+			var ev cdp.LifecycleEventParams
+			if json.Unmarshal(raw, &ev) == nil && ev.Name == "DOMContentLoaded" {
+				seenDCL[ev.LoaderID] = true
+				done = loaderID != "" && ev.LoaderID == loaderID
+			}
+		case <-deadline:
+			done = true
+		case <-client.Done():
+			done = true
+		}
 	}
-	sub.Close()
 
 	landed := currentURL(ctx, client, session, cfg)
 	cfg.dbg("in-browser upload landed on:", landed)
@@ -499,9 +545,10 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 // to a reused window across photos.
 //
 // The overlay writes "<nonce>|<name>" for a Tag and the nonce for a Skip; a
-// value that doesn't carry THIS photo's nonce is a blind/stale write (the fixed
-// debug port lets any local process forge one) and is ignored, so the wait
-// continues until a genuine tokened press.
+// value that doesn't carry THIS photo's nonce is a blind/stale write (the debug
+// port is discoverable from the profile's DevToolsActivePort file, so any local
+// process can forge one) and is ignored, so the wait continues until a genuine
+// tokened press.
 //
 // Close detection has two signals. Closing the whole window kills the
 // browser-level socket, so client.Done() fires ("closed"). Closing just the
@@ -627,7 +674,7 @@ func assistPageGone(ctx context.Context, client targetLister, targetID string) b
 // acceptTag validates a polled window.__stTag against this photo's nonce and
 // returns the highlighted name. The overlay writes "<nonce>|<name>", so a value
 // without the exact nonce prefix — a blind or stale write from another process
-// on the fixed debug port, or a leftover from a previous photo — is rejected.
+// on the discovered debug port, or a leftover from a previous photo — is rejected.
 // Pure, so the anti-hijack contract is unit-tested without a browser. An empty
 // nonce never accepts (fail-closed).
 func acceptTag(raw *string, nonce string) (string, bool) {

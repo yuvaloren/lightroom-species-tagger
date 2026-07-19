@@ -111,10 +111,22 @@ local function resolveHelper( isWin, pluginPath )
 	return candidates[ 1 ]
 end
 
+-- Uniquifier for the temp files below. os.time() alone has 1-second granularity
+-- in a SHARED temp dir: two Lightroom processes (two catalogs) tagging in the
+-- same second would interleave each other's stdout files. A per-process token
+-- (a table address is unique per allocation, and ASLR varies it across
+-- processes) plus a per-call counter makes every name distinct.
+local tmpToken = tostring( {} ):match( '(%x+)%s*$' ) or 'p'
+local tmpSeq = 0
+local function tmpName( suffix )
+	tmpSeq = tmpSeq + 1
+	return string.format( 'speciestagger-lens-%d-%s-%d.%s', os.time(), tmpToken, tmpSeq, suffix )
+end
+
 -- Run the bundled helper with `argv` (a list of already-decided string arguments)
 -- and `env` (ordered { name, value } pairs), capturing its single JSON stdout line.
 -- Returns the decoded table, or (nil, errString). Cross-platform (see above).
-local function runHelper( helper, argv, env, errFile )
+local function runHelper( helper, argv, env )
 	local LrTasks = import 'LrTasks'
 	local LrPathUtils = import 'LrPathUtils'
 	local LrFileUtils = import 'LrFileUtils'
@@ -128,12 +140,11 @@ local function runHelper( helper, argv, env, errFile )
 	end
 
 	local tmpDir = LrPathUtils.getStandardFilePath( 'temp' )
-	local out = LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.json', os.time() ) )
-	-- Always capture the helper's stderr (to the caller's file, or our own temp) so a launch
-	-- failure — node/Chrome/puppeteer missing, or a JS throw — surfaces in the error below
-	-- instead of a bare "no output". Ignored on the happy path.
-	local ownErr = errFile == nil
-	local errPath = errFile or LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.err', os.time() ) )
+	local out = LrPathUtils.child( tmpDir, tmpName( 'json' ) )
+	-- Always capture the helper's stderr so a launch failure — Chrome missing, or
+	-- a helper crash — surfaces in the error below instead of a bare "no output".
+	-- Ignored on the happy path.
+	local errPath = LrPathUtils.child( tmpDir, tmpName( 'err' ) )
 	local args = { q( helper ) }
 	for _, a in ipairs( argv ) do args[ #args + 1 ] = a.raw and tostring( a.value ) or q( a.value ) end
 	local invocation = table.concat( args, ' ' ) .. ' > ' .. q( out ) .. ' 2> ' .. q( errPath )
@@ -148,12 +159,12 @@ local function runHelper( helper, argv, env, errFile )
 			lines[ #lines + 1 ] = 'set ' .. q( kv[ 1 ] .. '=' .. ( kv[ 2 ]:gsub( '%%', '%%%%' ) ) )
 		end
 		lines[ #lines + 1 ] = invocation
-		batPath = LrPathUtils.child( tmpDir, string.format( 'speciestagger-lens-%d.bat', os.time() ) )
+		batPath = LrPathUtils.child( tmpDir, tmpName( 'bat' ) )
 		local bf = io.open( batPath, 'wb' )
 		if bf then bf:write( table.concat( lines, '\r\n' ) .. '\r\n' ); bf:close() end
 		LrTasks.execute( q( batPath ) )
 	else
-		-- POSIX: `NAME='v' ... node helper … > out 2>/dev/null` in one shell line.
+		-- POSIX: `NAME='v' ... lens-helper … > out 2> err` in one shell line.
 		local prefix = {}
 		for _, kv in ipairs( env ) do prefix[ #prefix + 1 ] = kv[ 1 ] .. '=' .. q( kv[ 2 ] ) .. ' ' end
 		LrTasks.execute( table.concat( prefix ) .. invocation )
@@ -166,7 +177,7 @@ local function runHelper( helper, argv, env, errFile )
 	local errText = ef and ef:read( '*a' )
 	if ef then ef:close() end
 	LrFileUtils.delete( out )
-	if ownErr then LrFileUtils.delete( errPath ) end
+	LrFileUtils.delete( errPath )
 	if batPath then LrFileUtils.delete( batPath ) end
 	-- A short, redacted one-line snippet of the helper's stderr to append to failure messages.
 	local function errHint()
@@ -175,8 +186,12 @@ local function runHelper( helper, argv, env, errFile )
 		oneLine = oneLine:gsub( '^ ', '' )
 		return ' — helper stderr: ' .. Log.redact( oneLine ):sub( 1, 300 )
 	end
+	-- The helper always prints one JSON line, even when Chrome is missing — so an
+	-- EMPTY stdout means the helper binary itself failed to run (quarantined,
+	-- wrong arch, clobbered install), not a Chrome problem.
 	if not body or body == '' then
-		return nil, 'Google Lens helper produced no output — is Google Chrome installed?' .. errHint()
+		return nil, 'Google Lens helper produced no output — the helper binary could not run; ' ..
+			'try reinstalling Species Tagger' .. errHint()
 	end
 	-- The helper prints ONE line of JSON on stdout. If that comes back truncated or
 	-- garbled, surface a diagnosable message (with the first chunk of what we got)

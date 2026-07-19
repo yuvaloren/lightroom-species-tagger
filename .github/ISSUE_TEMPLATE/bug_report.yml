@@ -56,8 +56,8 @@ body:
   - type: textarea
     id: env
     attributes:
-      label: Lightroom, Node, and Chrome versions
-      placeholder: "Lightroom Classic 13.2 · node v20.11 · Chrome 126"
+      label: Lightroom, Chrome, and OS versions
+      placeholder: "Lightroom Classic 13.2 · Chrome 126 · macOS 14.5"
   - type: textarea
     id: log
     attributes:

@@ -34,10 +34,12 @@ luacov.report.out
 /.output-trash-*
 
 # ─────────────────────────────────────────────────────────────────────────────
-# Never-commit user data. The automated suite uses NO real photos: unit tests replay
-# the committed GBIF JSON in test/plugin/fixtures/gbif/, and the Go helper integration
-# test generates a throwaway JPEG at run time. So no image belongs in the tree — this
-# guard keeps a stray photo (personal EXIF / GPS) from being committed by accident.
+# Never-commit user data. No image with personal metadata (EXIF / GPS / camera
+# serial) belongs in the tree. The only committed images are DELIBERATELY
+# metadata-stripped fixtures: the burst-accuracy corpus in
+# test/plugin/fixtures/burst-corpus/ and the imghash fixtures in
+# src/helper/imghash/testdata/. This guard keeps a stray personal photo from
+# being committed by accident.
 # ─────────────────────────────────────────────────────────────────────────────
 test/**/*.jpg
 test/**/*.jpeg

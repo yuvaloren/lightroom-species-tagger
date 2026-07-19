@@ -11,18 +11,18 @@ to review and revert. If a box doesn't apply, say so rather than deleting it.
 
 Run the same gate CI runs — paste the result or tick the box:
 
-- [ ] `just check` is green (lint + tests + build). No `just`? Run `luacheck src spec scripts`, `busted`, and `lua build/build.lua`.
+- [ ] `just check` is green (lint + unit tests + the burst-accuracy gate + build + the packaging guards). No `just`? Run `luacheck src test build`, `busted`, and `lua build/build.lua`.
 - [ ] `luacheck` reports **0 warnings** (the standard).
 
 ## If you changed logic
 
 - [ ] The change lives in a **pure module** (`src/plugin/shared/`) where it can, with I/O still injected via `deps` (no direct network/Lightroom calls in the pure layer).
-- [ ] I added or updated a **spec** in `spec/` (pure functions get white-box tests via the module's `_test` table).
+- [ ] I added or updated a **spec** in `test/plugin/` (pure functions get white-box tests via the module's `_test` table).
 
 ## If you touched the Lens helper or added test fixtures
 
 - [ ] Lens helper (Go) changes are covered by the integration suite (the real helper vs a local fake Google, no network) — run `just helper-itest`.
-- [ ] The suite uses **no real photos**; any new fixture is small, impersonal, and open-licensed/synthetic — **no personal photos, EXIF, accounts, or tokens**.
+- [ ] No image fixture carries **personal metadata** (the committed burst-corpus and imghash images are deliberately metadata-stripped); any new fixture is small, impersonal, and open-licensed/synthetic — **no personal photos, EXIF/GPS, accounts, or tokens**.
 
 ## Housekeeping
 

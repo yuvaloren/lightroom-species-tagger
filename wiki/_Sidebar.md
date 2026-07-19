@@ -4,7 +4,6 @@
 - [[Installing]]
 - [[Using it|Using-it]]
 - [[Settings]]
-- [[Troubleshooting]]
 - [[FAQ]]
 - [[Privacy]]
 

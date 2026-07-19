@@ -29,9 +29,9 @@ crop, then highlight the species and press Tag. (The plugin doesn't add a keywor
 its own.)
 
 ### Can I correct a wrong pick without re-shooting?
-Yes — nothing is read until you press Tag, so if you tagged the wrong thing, just highlight
-the right name and press Tag again. To remove an incorrect keyword, delete it from
-Lightroom's Keyword List.
+Yes — pressing Tag finishes that photo, so to fix a wrong pick, re-run the plugin on that
+photo and highlight the right name this time. To remove the incorrect keyword, delete it
+from Lightroom's Keyword List panel.
 
 ### How does it decide which species to tag?
 It doesn't — **you** do. It reads only the text you highlight and hands that one string to
@@ -52,11 +52,9 @@ Common names are searchable and human-friendly; Latin names are unambiguous and 
 across languages and regions. Storing both makes your catalog findable now and correct
 later.
 
-### Can I tag two animals in one photo?
-Yes — highlight one, press Tag, then highlight the other and press Tag again before moving
-on. Both keywords are applied to the photo.
-
 ### How do I know a change didn't break it?
-`just check` runs luacheck + the offline unit tests + the build, and `just lens-test`
-drives the real Lens helper against a fake Google. CI runs them on every push. The live
-browser flow itself is verified by hand in Lightroom (it can't be exercised offline).
+`just check` runs lint + the offline unit tests + the burst-accuracy gate + the build +
+the packaging guards, and `just helper-itest` drives the real Lens helper against a fake
+Google (`just lens-live` is the opt-in smoke test against the real Google). CI runs the
+gate on every push. The live browser flow itself is verified by hand in Lightroom (it
+can't be exercised offline).

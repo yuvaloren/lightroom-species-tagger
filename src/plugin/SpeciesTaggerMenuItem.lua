@@ -1,6 +1,6 @@
 --[[----------------------------------------------------------------------------
 SpeciesTaggerMenuItem.lua
-Entry point for Library > Plug-in Extras > "Identify and Tag Species". Runs the
+Entry point for File > Plug-in Extras > "Identify and Tag Species". Runs the
 work on an async task inside a function context (so progress + error handling
 behave), then hands off to TagSpecies.run.
 ------------------------------------------------------------------------------]]

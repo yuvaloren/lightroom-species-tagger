@@ -24,9 +24,9 @@ is involved — the bytes go straight to Google Lens.
   delete that folder to reset. No API key and no third-party host are involved.
   This drives a consumer Google surface in a visible browser, so Google may rate-limit
   or challenge it (run it from a normal home connection); nothing is sent anywhere else.
-- If you type **extra keywords** into the on-page bar and press Search, that text is
-  added to the Lens search and therefore sent to Google as part of the query. Nothing
-  else about the photo is sent.
+- If you type **extra search terms** into Google's own search box on the Lens page,
+  that text is added to the Lens search and therefore sent to Google as part of the
+  query. Nothing else about the photo is sent.
 
 ### Taxonomy (GBIF)
 Only **text names** (e.g. `Sufflamen bursa`, `Lei triggerfish`) are sent to

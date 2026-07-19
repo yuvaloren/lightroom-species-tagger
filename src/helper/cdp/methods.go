@@ -42,9 +42,15 @@ func (c *Client) CloseTarget(ctx context.Context, targetID string) error {
 	return c.Call(ctx, "", "Target.closeTarget", map[string]any{"targetId": targetID}, nil)
 }
 
-// EnablePageRuntime turns on the Page + Runtime domains for a session.
+// EnablePageRuntime turns on the Page + Runtime domains for a session, plus
+// Page.lifecycleEvent delivery — lifecycle events carry the loaderId that lets
+// a navigation wait bind to the exact document it started (see lens.goTo).
 func (c *Client) EnablePageRuntime(ctx context.Context, session string) error {
 	if err := c.Call(ctx, session, "Page.enable", nil, nil); err != nil {
+		return err
+	}
+	if err := c.Call(ctx, session, "Page.setLifecycleEventsEnabled",
+		map[string]any{"enabled": true}, nil); err != nil {
 		return err
 	}
 	return c.Call(ctx, session, "Runtime.enable", nil, nil)
@@ -69,18 +75,22 @@ func (c *Client) AddScriptOnNewDocument(ctx context.Context, session, source str
 		map[string]any{"source": source}, nil)
 }
 
-// Navigate starts a navigation; completion is observed via events.
-func (c *Client) Navigate(ctx context.Context, session, url string) error {
+// Navigate starts a navigation and returns its loaderId — the token that
+// identifies the DOCUMENT this navigation commits, so a completion wait can
+// match the navigation's own lifecycle events and never a stray one (empty for
+// a same-document navigation, which fires no document lifecycle at all).
+func (c *Client) Navigate(ctx context.Context, session, url string) (string, error) {
 	var out struct {
+		LoaderID  string `json:"loaderId"`
 		ErrorText string `json:"errorText"`
 	}
 	if err := c.Call(ctx, session, "Page.navigate", map[string]any{"url": url}, &out); err != nil {
-		return err
+		return "", err
 	}
 	if out.ErrorText != "" {
-		return fmt.Errorf("navigate %s: %s", url, out.ErrorText)
+		return "", fmt.Errorf("navigate %s: %s", url, out.ErrorText)
 	}
-	return nil
+	return out.LoaderID, nil
 }
 
 // Evaluate runs an expression. With byValue the JSON value lands in the

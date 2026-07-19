@@ -7,9 +7,9 @@ script or a path directly.
 ## Prerequisites
 
 - **just** — `brew install just` (the one thing that can't self-heal).
-- Everything else — the pinned Lua 5.1 toolchain, LuaRocks, dkjson, and Go —
-  is bootstrapped for you by `just setup`. Go and a C toolchain must exist
-  (`brew install go`); `just setup` installs the rest.
+- Everything else — the pinned Lua 5.1 toolchain, LuaRocks, dkjson, and Go
+  itself — is bootstrapped for you by `just setup` (on macOS it installs Go
+  via Homebrew if it's missing).
 - To run the plugin you also need **Google Chrome** and **Lightroom Classic**.
 
 ```sh
@@ -24,12 +24,12 @@ just setup
 | `just build` | From scratch → the installable bundle + zips in `output/dist/`. Idempotent; bootstraps anything missing. |
 | `just build clean` | Same, but wipes `output/` and the helper's build output first. |
 | `just test` | Lua specs (busted) + Go unit tests. |
-| `just itest` | Go integration suite — the real helper against a local fake Google (needs Chrome; `LENS_CHROME` to point at one). |
-| `just install` | Build if needed, then install the plugin into Lightroom's auto-load folder. |
+| `just helper-itest` | Go integration suite — the real helper against a local fake Google (needs Chrome; `LENS_CHROME` to point at one). |
+| `just install` | Build if needed, then install the plugin into `~/Documents/Lightroom Plugins` (override with `LR_PLUGIN_DIR`) — add it once via Lightroom's Plug-in Manager. (The installers use the auto-load `Modules` folder; `just install` doesn't.) |
 | `just uninstall` | Remove it. |
 | `just lens-live` | Opt-in smoke against the REAL Google (headed Chrome, ~30s). Run before releases; never in CI. |
 | `just lint` | luacheck + gofmt + go vet + shellcheck + staticcheck. |
-| `just check` | The full local gate: lint + tests + build. Run this before pushing. |
+| `just check` | The full local gate: lint + unit tests + the burst-accuracy gate + build + the packaging guards. Run this before pushing. |
 | `just package` | Build the signed + notarized installers (`.pkg`/`.exe`), zips, and checksums into `output/dist/` — no release. Runs from any branch. |
 
 Releases are cut by the maintainer only, via `just release` (which verifies
@@ -63,5 +63,7 @@ sit in a separate `test/` tree, since the plugin ships as source.
   under `src/plugin/shared/` stay free of SDK calls so the specs can run
   headless.
 
-Run `just check` before every push. CI runs the same gate plus the Go
-integration suite on macOS, Windows, and Linux.
+Run `just check` before every push. CI runs the same gate on macOS, Windows,
+and Linux, plus the Go integration suite on Windows and Linux (macOS is
+deliberately excluded from integration in CI — its runners can't run the
+renderer; macOS gets unit tests in CI plus the manual Mac E2E).

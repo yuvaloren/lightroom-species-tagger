@@ -55,16 +55,23 @@ local tmpCounter = 0
 -- wait (cooperatively) for its callback.
 local function jpegBytes( photo, maxEdge )
 	local data, errMsg, done
-	photo:requestJpegThumbnail( maxEdge, maxEdge, function( jpeg, err )
+	-- The SDK requires keeping the returned request object referenced until the
+	-- callback runs — Lightroom cancels the render when it is garbage-collected,
+	-- and a GC during the wait would leave `done` unset until the cap.
+	local request = photo:requestJpegThumbnail( maxEdge, maxEdge, function( jpeg, err )
 		if jpeg then data = jpeg else errMsg = err end
 		done = true
 	end )
 	local waited = 0
-	while not done and waited < 200 do -- up to ~20s
+	while not done and waited < 600 do -- up to ~60s (a huge RAW on a slow disk is slow, not failed)
 		LrTasks.sleep( 0.1 )
 		waited = waited + 1
 	end
-	if not data then return nil, errMsg or 'could not render a preview JPEG' end
+	local _ = request -- read AFTER the wait: the reference must provably outlive it
+	if not data then
+		return nil, errMsg or ( done and 'could not render a preview JPEG'
+			or 'timed out rendering a preview JPEG (60s)' )
+	end
 	return data
 end
 
@@ -126,7 +133,7 @@ end
 --------------------------------------------------------------------------------
 -- main
 
-function M.run( _ )
+function M.run( context )
 	local catalog = LrApplication.activeCatalog()
 	local photos = catalog:getTargetPhotos()
 	if not photos or #photos == 0 then
@@ -148,7 +155,9 @@ function M.run( _ )
 
 	LrDialogs.showBezel( 'A Chrome window opens showing Google’s results — highlight the species and press Tag.' )
 
-	local progress = LrProgressScope { title = 'Tag species with Lens…' }
+	-- Attached to the function context so an error anywhere below still removes
+	-- the scope from Lightroom's activity area instead of orphaning it there.
+	local progress = LrProgressScope { title = 'Tag species with Lens…', functionContext = context }
 	progress:setCancelable( true )
 
 	-- ── Gather: render every photo once, read burst metadata (LR I/O) ─────────
@@ -156,6 +165,17 @@ function M.run( _ )
 	-- user's Tag, apply to every member) is the pure, unit-tested TagRun module;
 	-- everything below just supplies the real effects it calls.
 	local items = {} -- selection order; each { id, photo, file|false, err, t, serial, label }
+
+	-- The rendered temp JPEGs must not outlive the run HOWEVER it ends — clean
+	-- finish, cancel, abort, or an error thrown anywhere below. A cleanup handler
+	-- runs on every exit from the context, so this is the single sweep
+	-- (onClusterDone already frees each burst's files as it completes; whatever
+	-- is left here is the remainder).
+	context:addCleanupHandler( function()
+		for _, it in ipairs( items ) do
+			if it.file then LrFileUtils.delete( it.file ) end
+		end
+	end )
 	for i, photo in ipairs( photos ) do
 		if progress:isCanceled() then break end
 		-- PhotoMeta calls the SDK getters BARE — they yield (catalog read access),
@@ -227,11 +247,6 @@ function M.run( _ )
 			warn = function( s ) log:warn( Log.redact( s ) ) end,
 		},
 	}
-
-	-- Cancel mid-run leaves later bursts' renders behind: sweep them.
-	for _, it in ipairs( items ) do
-		if it.file then LrFileUtils.delete( it.file ) end
-	end
 
 	-- NOTE: the reused window is closed inside TagRun (closeWindow dep) on a clean
 	-- finish only — an aborted run intentionally leaves it open for the user.

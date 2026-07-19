@@ -11,7 +11,7 @@
 #   Home, _Sidebar        wiki/Home.md, wiki/_Sidebar.md   (authored, wiki-only)
 #   Installing            README "## Install" section
 #   Using-it, Settings    README "## Using it" / "## Settings" sections
-#   Troubleshooting, FAQ  wiki/Troubleshooting.md, wiki/FAQ.md  (user-facing source)
+#   FAQ                   wiki/FAQ.md  (user-facing source)
 #   Privacy               wiki/Privacy.md
 #   images/               wiki/images/
 #
@@ -44,9 +44,9 @@ W="$TMP/wiki"
 # ---- authored wiki pages (the user-facing docs live here now) -------------------
 cp wiki/Home.md "$W/Home.md"
 cp wiki/_Sidebar.md "$W/_Sidebar.md"
-cp wiki/Troubleshooting.md "$W/Troubleshooting.md"
 cp wiki/FAQ.md "$W/FAQ.md"
 cp wiki/Privacy.md "$W/Privacy.md"
+rm -f "$W/Troubleshooting.md" # page retired (folded into the FAQ) — must also be removed from the wiki clone, or the stale page lives on forever
 if [ -d wiki/images ]; then
 	mkdir -p "$W/images"
 	cp wiki/images/* "$W/images/" 2>/dev/null || true

@@ -52,14 +52,18 @@ ALLOW_UNSIGNED=0
 ASSUME_YES=0
 TARGET=""
 SIGN_ARGS=()
-for a in "$@"; do
-	case "$a" in
+while [ $# -gt 0 ]; do
+	case "$1" in
 		--no-publish) NO_PUBLISH=1 ;;
 		--yes) ASSUME_YES=1 ;;
-		--version=*) TARGET="${a#--version=}" ;;
-		--allow-unsigned) ALLOW_UNSIGNED=1; SIGN_ARGS+=( "$a" ) ;;
-		*) SIGN_ARGS+=( "$a" ) ;;
+		--version=*) TARGET="${1#--version=}" ;;
+		--version)
+			[ $# -ge 2 ] || die "--version needs a value (e.g. --version 0.4.0)"
+			shift; TARGET="$1" ;;
+		--allow-unsigned) ALLOW_UNSIGNED=1; SIGN_ARGS+=( "$1" ) ;;
+		*) SIGN_ARGS+=( "$1" ) ;;
 	esac
+	shift
 done
 [ "$ALLOW_UNSIGNED" = "0" ] || [ "$NO_PUBLISH" = "1" ] \
 	|| die "--allow-unsigned is for dry runs — add --no-publish (an unsigned build never ships)"

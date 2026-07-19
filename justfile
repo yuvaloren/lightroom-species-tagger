@@ -33,11 +33,14 @@ _deps:
 _toolchain:
     @[ -x .lua-env/bin/lua ] || just setup
 
-# static analysis: Lua (luacheck) + Go (gofmt/vet) + shell (shellcheck)
+# static analysis: Lua (luacheck) + Go (gofmt/vet/staticcheck) + shell (shellcheck).
+# Every gate here is HARD and matches CI — a green `just lint` locally must mean
+# a green lint in CI. staticcheck is pinned in lock-step with .github/workflows/ci.yml.
 lint:
     luacheck src test build
     cd src/helper && test -z "$(gofmt -l .)" && go vet ./... && go vet -tags integration ./...
-    shellcheck build/*.sh || true
+    cd src/helper && go run honnef.co/go/tools/cmd/staticcheck@2026.1 ./... && go run honnef.co/go/tools/cmd/staticcheck@2026.1 -tags integration ./...
+    shellcheck -S warning build/*.sh
 
 # run the unit tests (Lua specs + Go helper units)
 test: _deps

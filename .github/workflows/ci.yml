@@ -235,6 +235,13 @@ jobs:
           cache-dependency-path: src/helper/go.sum
       - uses: browser-actions/setup-chrome@2e1d749697dd1612b833dba4a722266286fbefcd # v2.1.2
         id: setup-chrome
+      - name: Unit tests (full module)
+        # The build job runs these on Linux only; without this, the Windows
+        # branches of lrprefs (APPDATA prefs path), chrome discovery, and
+        # imghash would never execute on windows-latest at all.
+        working-directory: src/helper
+        run: go test -race -count=1 ./...
+
       - name: Integration suite (scenarios, upload path, lifecycle, trusted click)
         working-directory: src/helper
         env:

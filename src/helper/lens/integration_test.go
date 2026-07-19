@@ -537,12 +537,13 @@ func TestSquattedLegacyPortStillWorks(t *testing.T) {
 
 // ---- anti-hijack: a blind __stTag write is not a Tag ----------------------------
 
-// The assist window's debug port is fixed and predictable, so any local process
-// can connect and blind-write window.__stTag to forge a Tag the user never
-// pressed — observed in the wild as a stand-in binary injecting a fixed species
-// name, which made the plugin "auto-tag" every photo without ever pausing. The
-// per-photo nonce must make such a write a no-op: the run keeps waiting and
-// times out, and NEVER returns the injected name.
+// The assist window's debug port is discoverable by any local process (the
+// profile's DevToolsActivePort file is user-readable), so one can connect and
+// blind-write window.__stTag to forge a Tag the user never pressed — observed
+// in the wild as a stand-in binary injecting a fixed species name, which made
+// the plugin "auto-tag" every photo without ever pausing. The per-photo nonce
+// must make such a write a no-op: the run keeps waiting and times out, and
+// NEVER returns the injected name.
 func TestBlindInjectionIgnored(t *testing.T) {
 	f := startFakeGoogle(t)
 	cache := newCacheDir(t)
@@ -907,7 +908,7 @@ func TestSelectionSnapsToSpeciesName(t *testing.T) {
 	defer cancel()
 	// One text node, real page text shape: common name, then the binomial in
 	// parentheses — the exact thing users highlight (and mis-highlight).
-	if err := client.Navigate(cctx, session,
+	if _, err := client.Navigate(cctx, session,
 		"data:text/html,<p id=host style=font-size:20px>Blue-footed booby (Sula nebouxii) in flight</p>"); err != nil {
 		t.Fatal(err)
 	}
@@ -1061,7 +1062,7 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 	}
 	cctx, cancel := context.WithTimeout(ctx, 60*time.Second)
 	defer cancel()
-	if err := client.Navigate(cctx, session,
+	if _, err := client.Navigate(cctx, session,
 		"data:text/html,<h2 id=sp>"+name+"</h2><p>some other, unrelated body text</p>"); err != nil {
 		t.Fatal(err)
 	}

@@ -11,9 +11,10 @@ serialised and runs in the browser on every document. It communicates by setting
 globals (window.__stTag / window.__stSkip) that the Go side POLLS — no exposeFunction,
 so it keeps working when the helper reconnects to a reused window/tab across photos.
 
-Anti-hijack: the assist window's debug port is a fixed, predictable localhost port,
-so ANY local process could connect and blind-write window.__stTag to forge a Tag
-(observed in the wild: a stand-in process injecting a fixed species name). So the
+Anti-hijack: Chrome picks the assist window's debug port, but the profile's
+DevToolsActivePort file is readable by any local process running as the user, so
+one could still connect and blind-write window.__stTag to forge a Tag (observed
+in the wild: a stand-in process injecting a fixed species name). So the
 button does not write a bare name — it writes `<token>|<name>`, where `token` is a
 per-photo nonce the helper injected via addScriptToEvaluateOnNewDocument. The helper
 accepts a Tag only when the token matches the CURRENT photo's nonce; a blind or stale
@@ -94,7 +95,7 @@ function assistOverlayInjector(pos, token) {
     bar.appendChild(spacer);
 
     var hint = document.createElement('span');
-    hint.textContent = 'Highlight the species Latin name and press';
+    hint.textContent = 'Highlight the species name and press';
     hint.style.cssText = 'color:#a8c4b4;white-space:nowrap';
     bar.appendChild(hint);
 

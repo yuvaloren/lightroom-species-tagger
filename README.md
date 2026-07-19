@@ -98,7 +98,7 @@ the old state back when it quits — quit Lightroom and run the installer again.
    `SpeciesTagger.lrplugin` folder.
 4. The first time you run it, a short **welcome** lists every setting and where to
    find it. Open **Plug-in Manager ▸ Species Tagger** any time to adjust them.
-5. Select photos in the Library, then **Library ▸ Plug-in Extras ▸ Identify and
+5. Select photos in the Library, then **File ▸ Plug-in Extras ▸ Identify and
    Tag Species**.
 
 > Google gates the Lens endpoint on the **network you run from** — use a normal home
@@ -186,14 +186,15 @@ just build         # from a clean checkout to the bundle + zips in output/dist/ 
 just build clean   # same, wiping output/ first
 just test          # Lua specs (busted) + Go helper unit tests
 just install       # build if needed, then install a copy into Lightroom (Add/Reload)
-just check         # the full gate: lint + tests + build (run before pushing)
+just check         # the full gate: lint + unit tests + burst-accuracy + build + packaging guards (run before pushing)
 just package       # build the signed + notarized installers (.pkg/.exe/zips), no release
 just release       # the real release (verifies on main + clean + synced, then publishes)
 ```
 
 `just build` bootstraps the toolchain if it's missing and cross-compiles the Go
 helper itself — there is no separate step to remember, and **no AI in the loop**:
-`just check` is the whole gate, and it's exactly what CI runs. See
+`just check` is the whole gate, and it's the same gate CI runs (CI additionally
+runs the Go helper integration suite). See
 [CONTRIBUTING.md](CONTRIBUTING.md) for the full list.
 
 ## Repository layout — authored vs. generated
@@ -209,7 +210,8 @@ src/plugin/shared/  pure, testable modules (name resolver, taxonomy, keywords, h
 src/helper/         the Go lens helper (CDP client, Chrome control, overlay, tests)
 test/plugin/        unit specs (busted) + GBIF fixtures for offline tests
 build/              build.lua + the sign/package/installer/release scripts
-wiki/               the user-facing guide (generated pages)
+wiki/               the authored wiki source pages (Installing/Using-it/Settings
+                    are generated from this README at release by build/sync-wiki.sh)
 ```
 
 **Generated or third-party — never committed, all reproducible, all git-ignored:**
@@ -239,8 +241,10 @@ to vendor.
 
 A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS) is uploaded to
 Google Lens. No third-party image host is involved. Taxonomy lookups send only
-**names** to GBIF, and no user-typed text is sent anywhere. The security posture
-and data flow are detailed in [SECURITY.md](SECURITY.md).
+**names** to GBIF, and no user-typed text is sent anywhere. The full data flow is
+on the wiki's [Privacy](https://github.com/yuvaloren/lightroom-species-tagger/wiki/Privacy)
+page; please report vulnerabilities privately via
+[GitHub security advisories](https://github.com/yuvaloren/lightroom-species-tagger/security/advisories/new).
 
 ## Limitations
 
@@ -275,8 +279,8 @@ third-party services.
 ## Contributing
 
 Issues and PRs welcome. [CONTRIBUTING.md](CONTRIBUTING.md) is the whole setup — the
-command surface, the layout, and where things live — and `just check` (lint + tests +
-build) is the entire gate.
+command surface, the layout, and where things live — and `just check` (lint + unit
+tests + the burst-accuracy gate + build + the packaging guards) is the entire gate.
 
 ## License
 
