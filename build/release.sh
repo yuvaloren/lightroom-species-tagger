@@ -192,7 +192,14 @@ fi
 # ---- 7. commit, tag, push ------------------------------------------------------
 say "committing VERSION + CHANGELOG and tagging v$VERSION"
 git add VERSION CHANGELOG.md
-git commit -q -m "chore(release): v$VERSION"
+# A re-cut (a prior attempt already committed this VERSION + CHANGELOG, e.g. it
+# stopped before tagging) stages nothing — and an empty `git commit` exits 1,
+# which would kill the release right after the user confirmed. Tag HEAD instead.
+if git diff --cached --quiet; then
+	say "VERSION + CHANGELOG already committed (re-cut) — tagging HEAD"
+else
+	git commit -q -m "chore(release): v$VERSION"
+fi
 git tag "v$VERSION"
 git push -q origin main
 git push -q origin "v$VERSION"
