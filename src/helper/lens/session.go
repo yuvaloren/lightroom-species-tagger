@@ -152,7 +152,7 @@ func Run(cfg Config) Result {
 	}
 	defer client.Close() // disconnect only — never kills the reused window
 
-	session, err := newPage(ctx, client, cfg)
+	session, targetID, err := newPage(ctx, client, cfg)
 	if err != nil {
 		return fail("assist failed: " + err.Error())
 	}
@@ -175,7 +175,7 @@ func Run(cfg Config) Result {
 		return fail(err.Error())
 	}
 
-	outcome, name := waitForTag(ctx, client, session, cfg, nonce)
+	outcome, name := waitForTag(ctx, client, session, targetID, cfg, nonce)
 	cfg.dbg("assist outcome:", outcome, name)
 	switch outcome {
 	case "tag":
@@ -294,24 +294,24 @@ func connectOrLaunch(ctx context.Context, cfg Config) (*cdp.Client, error) {
 // newPage opens a fresh tab for this photo and closes the others, so there is
 // a single visible tab and the overlay's addScriptToEvaluateOnNewDocument
 // can't accumulate across photos.
-func newPage(ctx context.Context, client *cdp.Client, cfg Config) (string, error) {
+func newPage(ctx context.Context, client *cdp.Client, cfg Config) (session, targetID string, err error) {
 	// Generous budget: this guards against a hung browser, not slowness —
 	// puppeteer's default protocol timeout was 180 s, and CI's shared mac
 	// runners have shown 15 s to be too tight for real page creation.
 	cctx, cancel := context.WithTimeout(ctx, 90*time.Second)
 	defer cancel()
-	targetID, err := client.CreateTarget(cctx, "about:blank")
+	targetID, err = client.CreateTarget(cctx, "about:blank")
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	cfg.dbg("created target:", targetID)
-	session, err := client.AttachToTarget(cctx, targetID)
+	session, err = client.AttachToTarget(cctx, targetID)
 	if err != nil {
-		return "", err
+		return "", "", err
 	}
 	cfg.dbg("attached session:", session)
 	if err := client.EnablePageRuntime(cctx, session); err != nil {
-		return "", err
+		return "", "", err
 	}
 	targets, err := client.GetTargets(cctx)
 	if err == nil {
@@ -321,7 +321,7 @@ func newPage(ctx context.Context, client *cdp.Client, cfg Config) (string, error
 			}
 		}
 	}
-	return session, nil
+	return session, targetID, nil
 }
 
 // newNonce returns a fresh unguessable per-photo token. crypto/rand can't fail
@@ -515,7 +515,7 @@ func currentURL(ctx context.Context, client *cdp.Client, session string, cfg Con
 // never abandoned on a timer, only on a Tag/Skip or a window close. A positive
 // timeout bounds the wait — the test suites set one so a "never decides" page
 // can't hang the suite; production never does.
-func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Config, nonce string) (string, string) {
+func waitForTag(ctx context.Context, client *cdp.Client, session, targetID string, cfg Config, nonce string) (string, string) {
 	var deadline time.Time
 	bounded := cfg.Timeout > 0
 	if bounded {
@@ -560,13 +560,13 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 			}
 		}
 
-		// Tab-close detection: a clean GetTargets with no page target means the
-		// user closed the assist tab. Two consecutive confirmations guard against
-		// a transient read during navigation (a GetTargets error is inconclusive,
-		// not a miss). An Evaluate error alone is NOT enough — it also happens
-		// mid-navigation — so we corroborate with the target list.
+		// Tab-close detection: our assist target vanishing from GetTargets means
+		// the user closed the assist window/tab. Two consecutive confirmations
+		// guard against a transient read during navigation (a GetTargets error is
+		// inconclusive, not a miss). An Evaluate error alone is NOT enough — it
+		// also happens mid-navigation — so we corroborate with the target list.
 		if err != nil {
-			if noPageTarget(ctx, client) {
+			if assistPageGone(ctx, client, targetID) {
 				pageGone++
 				if pageGone >= 2 {
 					return "closed", ""
@@ -588,11 +588,28 @@ func waitForTag(ctx context.Context, client *cdp.Client, session string, cfg Con
 	return "timeout", ""
 }
 
-// noPageTarget reports whether the browser currently lists NO page target — the
-// user closed the assist tab/window. A GetTargets error is inconclusive
-// (transient / mid-teardown) and reported as false, so only a clean empty result
-// counts; whole-browser death is caught separately by client.Done().
-func noPageTarget(ctx context.Context, client *cdp.Client) bool {
+// targetLister is the slice of the CDP client the close-detector needs — just
+// Target.getTargets. A narrow interface so assistPageGone is unit-tested without
+// a browser (see session_test.go).
+type targetLister interface {
+	GetTargets(ctx context.Context) ([]cdp.TargetInfo, error)
+}
+
+// assistPageGone reports whether OUR assist page target (the one we created and
+// injected the overlay into) is no longer listed — the user closed the assist
+// window or tab. We track our SPECIFIC targetID rather than "are there zero page
+// targets" because neither older signal is reliable:
+//   - client.Done() (browser-socket death) never fires on macOS: closing the
+//     last Chrome window leaves the browser process alive (verified against real
+//     macOS Chrome 2026-07-19).
+//   - "no page target at all" is defeated by any stray page target — a Google
+//     Lens popup, an extension page, a hosted CI runner's blank tab — which keeps
+//     it from ever firing. That single flaw was BOTH the macOS "never aborts" bug
+//     and the windows-latest CI hang.
+//
+// A GetTargets error is inconclusive (transient / mid-teardown) and reported as
+// false, so only a clean list that omits our target counts as closed.
+func assistPageGone(ctx context.Context, client targetLister, targetID string) bool {
 	cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 	defer cancel()
 	targets, err := client.GetTargets(cctx)
@@ -600,8 +617,8 @@ func noPageTarget(ctx context.Context, client *cdp.Client) bool {
 		return false
 	}
 	for _, t := range targets {
-		if t.Type == "page" {
-			return false
+		if t.TargetID == targetID {
+			return false // our assist page is still there
 		}
 	}
 	return true

@@ -1,13 +1,63 @@
 package lens
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"os"
 	"path/filepath"
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/yuvaloren/lightroom-species-tagger/helper/cdp"
 )
+
+// fakeLister stands in for the CDP client's Target.getTargets so the
+// close-detector can be unit-tested without a browser.
+type fakeLister struct {
+	targets []cdp.TargetInfo
+	err     error
+}
+
+func (f fakeLister) GetTargets(_ context.Context) ([]cdp.TargetInfo, error) {
+	return f.targets, f.err
+}
+
+// Close-detection must track OUR specific assist target's disappearance — not
+// "are there zero page targets" and not "did the browser socket die". Verified
+// empirically against real macOS Chrome (2026-07-19): closing the assist window
+// leaves the browser process ALIVE (so client.Done() never fires) and any stray
+// page target (a Lens popup, an extension page, a CI runner's blank tab) keeps a
+// "no page targets at all" check from ever firing. The reliable signal is that
+// the targetID we created and injected the overlay into is gone from getTargets.
+func TestAssistPageGone(t *testing.T) {
+	const ours = "OUR-TARGET-ID"
+	page := func(id string) cdp.TargetInfo { return cdp.TargetInfo{TargetID: id, Type: "page"} }
+	cases := []struct {
+		name    string
+		targets []cdp.TargetInfo
+		err     error
+		want    bool
+	}{
+		{"our page present → not closed", []cdp.TargetInfo{page(ours)}, nil, false},
+		{"our page present alongside a stray → not closed", []cdp.TargetInfo{page(ours), page("STRAY")}, nil, false},
+		// The bug: our page is gone but a stray page remains. The old
+		// "no page target at all" check returned false here (a page still
+		// exists) and NEVER detected the close — and on macOS client.Done()
+		// never fired either, so the run hung. Tracking OUR target fixes it.
+		{"our page gone, a stray page remains → CLOSED", []cdp.TargetInfo{page("STRAY")}, nil, true},
+		{"no targets at all → closed", nil, nil, true},
+		{"GetTargets error is inconclusive → not closed", []cdp.TargetInfo{page("STRAY")}, errors.New("boom"), false},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			if got := assistPageGone(context.Background(), fakeLister{c.targets, c.err}, ours); got != c.want {
+				t.Errorf("assistPageGone = %v, want %v", got, c.want)
+			}
+		})
+	}
+}
 
 // The stdout contract: field set, key order, and truth-table must match the
 // Node helper exactly — the Lua side's interpretTagResult depends on it.

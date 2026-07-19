@@ -728,6 +728,128 @@ func TestWindowCloseAborts(t *testing.T) {
 	}
 }
 
+// The close-abort must survive a STRAY page target in the assist profile. This
+// is the exact condition that made the old "no page target at all" detector
+// fail: on macOS the browser process stays alive after the window closes (so
+// client.Done() never fires) and a leftover page (a Lens popup, an extension
+// page, a hosted CI runner's blank tab) means GetTargets is never empty — so the
+// run hung forever and NEVER reported the close. Reproduced platform-independently
+// here by opening a second page before closing the assist page: with the old
+// detector this hangs to the deadline; tracking OUR target aborts promptly.
+// (This is the regression guard that would have caught the macOS bug + the
+// windows-latest CI flake.)
+func TestWindowCloseAbortsWithStrayPage(t *testing.T) {
+	f := startFakeGoogle(t)
+	cache := newCacheDir(t)
+	img := tmpImage(t, "not-a-real-jpeg-just-needs-to-exist")
+
+	done := make(chan map[string]any, 1)
+	go func() {
+		rctx, rcancel := context.WithTimeout(context.Background(), 150*time.Second)
+		defer rcancel()
+		cmd := exec.CommandContext(rctx, helperBin, img)
+		cmd.Env = append(os.Environ(),
+			"LENS_TEST_HEADLESS=1", "LENS_DEBUG=1",
+			"LENS_CACHE_DIR="+cache,
+			"LENS_TEST_URL="+f.srv.URL+"/results", // no tag/skip, no timeout: waits forever
+		)
+		var stdout, stderr bytes.Buffer
+		cmd.Stdout, cmd.Stderr = &stdout, &stderr
+		_ = cmd.Run()
+		if s := strings.TrimSpace(stderr.String()); s != "" {
+			t.Logf("stray-close helper stderr: %s", s)
+		}
+		var res map[string]any
+		lines := strings.Split(strings.TrimSpace(stdout.String()), "\n")
+		_ = json.Unmarshal([]byte(strings.TrimSpace(lines[len(lines)-1])), &res)
+		done <- res
+	}()
+
+	ctx := context.Background()
+	var client *cdp.Client
+	for i := 0; i < 200; i++ {
+		time.Sleep(100 * time.Millisecond)
+		p, err := readDevToolsActivePort(filepath.Join(cache, "chrome-profile-assist"))
+		if err != nil {
+			continue
+		}
+		if c, err := connect(ctx, p); err == nil {
+			client = c
+			break
+		}
+	}
+	if client == nil {
+		t.Fatal("assist window never came up")
+	}
+	defer client.Close()
+
+	// Wait until the assist page is up with the overlay present (the run is now
+	// waiting on the user), and record which target is ours.
+	var assistPage string
+	deadline := time.Now().Add(45 * time.Second)
+	for time.Now().Before(deadline) {
+		targets, err := client.GetTargets(ctx)
+		if err == nil {
+			for _, tt := range targets {
+				if tt.Type != "page" {
+					continue
+				}
+				if s, err := client.AttachToTarget(ctx, tt.TargetID); err == nil {
+					ectx, cancel := context.WithTimeout(ctx, 3*time.Second)
+					obj, err := client.Evaluate(ectx, s, "!!document.getElementById('__lens_tag')", true)
+					cancel()
+					if err == nil && obj != nil && string(obj.Value) == "true" {
+						assistPage = tt.TargetID
+					}
+				}
+			}
+		}
+		if assistPage != "" {
+			break
+		}
+		time.Sleep(200 * time.Millisecond)
+	}
+	if assistPage == "" {
+		t.Fatal("assist page never appeared")
+	}
+
+	// Open a STRAY page (persists — the helper's startup close already ran), so
+	// closing the assist page below does NOT empty the page-target list.
+	stray, err := client.CreateTarget(ctx, "about:blank")
+	if err != nil {
+		t.Fatalf("opening the stray page: %v", err)
+	}
+
+	// The run must still be waiting — the stray must not have tripped anything.
+	select {
+	case res := <-done:
+		t.Fatalf("run ended before the window was closed: %v", res)
+	default:
+	}
+
+	// The user closes the assist window (its page target), leaving the stray.
+	cctx, cancel := context.WithTimeout(ctx, 10*time.Second)
+	err = client.CloseTarget(cctx, assistPage)
+	cancel()
+	if err != nil {
+		t.Fatalf("closing the assist page: %v", err)
+	}
+
+	select {
+	case res := <-done:
+		if res["ok"] != false || res["aborted"] != true {
+			t.Fatalf("closing the window (stray present) did not abort the run: %v", res)
+		}
+		if msg, _ := res["error"].(string); !strings.Contains(strings.ToLower(msg), "window") {
+			t.Fatalf("abort did not name the window as the cause: %v", res)
+		}
+	case <-time.After(30 * time.Second):
+		t.Fatal("helper never returned after the window was closed (stray page defeated close detection)")
+	}
+
+	_ = client.CloseTarget(ctx, stray) // tidy up
+}
+
 // ---- selection snapping: a sloppy highlight self-corrects on mouse release ------
 
 // Highlighting a species name by hand is fiddly: it's easy to catch a
@@ -777,7 +899,7 @@ func TestSelectionSnapsToSpeciesName(t *testing.T) {
 		client.Close()
 	}()
 
-	session, err := newPage(ctx, client, Config{Debug: true})
+	session, _, err := newPage(ctx, client, Config{Debug: true})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -933,7 +1055,7 @@ func TestTrustedClickPreservesSelection(t *testing.T) {
 		client.Close()
 	}()
 
-	session, err := newPage(ctx, client, Config{Debug: true})
+	session, _, err := newPage(ctx, client, Config{Debug: true})
 	if err != nil {
 		t.Fatal(err)
 	}
