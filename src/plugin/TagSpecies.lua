@@ -202,8 +202,14 @@ function M.run( _ )
 		applyCluster = function( members, plan )
 			local undoLabel = #members > 1
 				and string.format( 'Tag species (%d photos)', #members ) or 'Tag species'
+			-- Create the plan's keywords ONCE and attach the handles to every frame:
+			-- re-running createKeyword per photo in one write transaction returns no
+			-- usable handle for repeats and silently dropped keywords on every frame
+			-- past the first (see shared/KeywordApply.lua).
+			local clusterPhotos = {}
+			for _, m in ipairs( members ) do clusterPhotos[ #clusterPhotos + 1 ] = m.photo end
 			catalog:withWriteAccessDo( undoLabel, function()
-				for _, m in ipairs( members ) do KeywordApply.apply( catalog, m.photo, plan, cfg ) end
+				KeywordApply.applyCluster( catalog, clusterPhotos, plan, cfg )
 			end, { timeout = 30 } )
 		end,
 		onClusterDone = function( members ) -- free the disk as each burst finishes
