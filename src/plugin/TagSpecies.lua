@@ -3,8 +3,10 @@ TagSpecies.lua
 The action, run inside Lightroom. Assistive Google Lens workflow, burst-aware.
 The run has three phases:
 
-  1. GATHER  — for every selected photo: render a downsized JPEG
-     (requestJpegThumbnail — also strips original EXIF/GPS) and read capture
+  1. GATHER  — render every selected photo to a downsized JPEG through
+     Lightroom's EXPORT pipeline (LrExportSession — a real render from the
+     negative with the current develop settings, original EXIF/GPS stripped;
+     see shared/Render.lua for why NOT requestJpegThumbnail) and read capture
      time + camera serial from the catalog; then one helper call (hash mode,
      no Chrome) fingerprints all the renders.
   2. CLUSTER — Burst.cluster groups near-identical frames shot within
@@ -32,6 +34,7 @@ local LrDialogs = import 'LrDialogs'
 local LrProgressScope = import 'LrProgressScope'
 local LrPathUtils = import 'LrPathUtils'
 local LrFileUtils = import 'LrFileUtils'
+local LrExportSession = import 'LrExportSession'
 
 local Config = require 'Config'
 local PhotoMeta = require 'PhotoMeta'
@@ -39,11 +42,16 @@ local SelectedName = require 'SelectedName'
 local KeywordApply = require 'KeywordApply'
 local Burst = require 'Burst'
 local TagRun = require 'TagRun'
+local Render = require 'Render'
 local Http = require 'Http'
 local Log = require 'Log'
 
 local M = {}
 local log = Log.new( 'SpeciesTagger' )
+
+-- How long a keyword write may wait for the catalog before it is reported as
+-- NOT saved (see applyCluster below).
+local WRITE_TIMEOUT_SECONDS = 30
 
 
 --------------------------------------------------------------------------------
@@ -51,53 +59,38 @@ local log = Log.new( 'SpeciesTagger' )
 
 local tmpCounter = 0
 
--- Render a downsized JPEG of the photo into memory. requestJpegThumbnail is async; we
--- wait (cooperatively) for its callback.
-local function jpegBytes( photo, maxEdge )
-	local data, errMsg, done
-	-- The SDK requires keeping the returned request object referenced until the
-	-- callback runs — Lightroom cancels the render when it is garbage-collected,
-	-- and a GC during the wait would leave `done` unset until the cap.
-	local request = photo:requestJpegThumbnail( maxEdge, maxEdge, function( jpeg, err )
-		if jpeg then data = jpeg else errMsg = err end
-		done = true
-	end )
-	local waited = 0
-	while not done and waited < 600 do -- up to ~60s (a huge RAW on a slow disk is slow, not failed)
-		LrTasks.sleep( 0.1 )
-		waited = waited + 1
-	end
-	local _ = request -- read AFTER the wait: the reference must provably outlive it
-	if not data then
-		return nil, errMsg or ( done and 'could not render a preview JPEG'
-			or 'timed out rendering a preview JPEG (60s)' )
-	end
-	return data
-end
+-- Uniquifier for this process's run folders: os.time() alone is 1-second
+-- coarse in a SHARED temp dir, and two Lightroom processes (two catalogs) could
+-- otherwise render into each other's folder. A table address is unique per
+-- allocation and ASLR varies it across processes (same trick as Http.lua).
+local tmpToken = tostring( {} ):match( '(%x+)%s*$' ) or 'p'
 
 local function tempChild( name )
 	return LrPathUtils.child( LrPathUtils.getStandardFilePath( 'temp' ), name )
 end
 
-local function writeTempJpeg( bytes )
+-- A private folder for this run's renders. Everything the export writes lands
+-- here (original file names, collisions renamed), and the cleanup handler
+-- removes the whole folder however the run ends.
+local function newRunDir()
 	tmpCounter = tmpCounter + 1
-	local path = tempChild( string.format( 'speciestagger-%d-%d.jpg', os.time(), tmpCounter ) )
-	local fh, err = io.open( path, 'wb' )
-	if not fh then return nil, err end
-	fh:write( bytes )
-	fh:close()
-	return path
+	local dir = tempChild( string.format( 'speciestagger-%d-%s-%d', os.time(), tmpToken, tmpCounter ) )
+	LrFileUtils.createAllDirectories( dir )
+	return dir
 end
 
 -- One image path per line for the helper's hash mode; a blank line marks a
 -- photo whose render failed (the helper answers null, Burst leaves it alone).
-local function writeTempList( paths )
+-- nil when the list could not be written in full — a truncated list would
+-- hash the wrong files against the wrong frames.
+local function writeTempList( dir, paths )
 	tmpCounter = tmpCounter + 1
-	local path = tempChild( string.format( 'speciestagger-hashlist-%d-%d.txt', os.time(), tmpCounter ) )
+	local path = LrPathUtils.child( dir, string.format( 'speciestagger-hashlist-%d.txt', tmpCounter ) )
 	local fh = io.open( path, 'wb' )
 	if not fh then return nil end
-	fh:write( table.concat( paths, '\n' ) .. '\n' )
+	local ok = fh:write( table.concat( paths, '\n' ) .. '\n' )
 	fh:close()
+	if not ok then LrFileUtils.delete( path ); return nil end
 	return path
 end
 
@@ -135,8 +128,11 @@ end
 
 function M.run( context )
 	local catalog = LrApplication.activeCatalog()
+	-- getTargetPhotos() returns EVERY photo in the filmstrip when nothing is
+	-- selected (documented SDK behavior) — so "no selection" used to tag the
+	-- whole folder. getTargetPhoto() is nil in exactly that case; gate on it.
 	local photos = catalog:getTargetPhotos()
-	if not photos or #photos == 0 then
+	if not catalog:getTargetPhoto() or not photos or #photos == 0 then
 		LrDialogs.message( 'Species Tagger', 'Select one or more photos first.', 'info' )
 		return
 	end
@@ -165,42 +161,62 @@ function M.run( context )
 	-- user's Tag, apply to every member) is the pure, unit-tested TagRun module;
 	-- everything below just supplies the real effects it calls.
 	local items = {} -- selection order; each { id, photo, file|false, err, t, serial, label }
+	local runDir = newRunDir()
 
-	-- The rendered temp JPEGs must not outlive the run HOWEVER it ends — clean
+	-- The rendered JPEGs must not outlive the run HOWEVER it ends — clean
 	-- finish, cancel, abort, or an error thrown anywhere below. A cleanup handler
 	-- runs on every exit from the context, so this is the single sweep
 	-- (onClusterDone already frees each burst's files as it completes; whatever
-	-- is left here is the remainder).
+	-- is left here is the remainder, then the run folder itself).
 	context:addCleanupHandler( function()
 		for _, it in ipairs( items ) do
 			if it.file then LrFileUtils.delete( it.file ) end
 		end
+		LrFileUtils.delete( runDir )
 	end )
-	for i, photo in ipairs( photos ) do
-		if progress:isCanceled() then break end
-		-- PhotoMeta calls the SDK getters BARE — they yield (catalog read access),
-		-- and a yield cannot cross a plain pcall in Lua 5.1. The pcall wrappers
-		-- that used to sit here failed on every call because of that, which
-		-- silently untimed every frame and broke burst grouping in the field
-		-- (see shared/PhotoMeta.lua and photometa_spec.lua).
-		local meta = PhotoMeta.read( photo, cfg.burstDetect )
-		progress:setCaption( string.format( 'Preparing %s (%d of %d)', meta.label, i, #photos ) )
-		progress:setPortionComplete( i - 1, #photos )
 
-		local it = { id = i, photo = photo, label = meta.label, t = meta.t, serial = meta.serial, file = false }
-		local bytes, err = jpegBytes( photo, cfg.maxEdge )
-		if not bytes then
-			it.err = err
+	-- Render through the export pipeline, not photo:requestJpegThumbnail. The
+	-- thumbnail call answers from the preview cache, which in the Develop module
+	-- (or right after a Develop edit, before the preview is rebuilt) hands back a
+	-- blank/stale placeholder first, an "error loading thumb", or nothing at all
+	-- — see shared/Render.lua. An export is a definite render of the CURRENT
+	-- develop state in every module, one file per photo, or a definite error.
+	local session = LrExportSession {
+		photosToExport = photos,
+		exportSettings = Render.exportSettings { maxEdge = cfg.maxEdge, outDir = runDir },
+	}
+	session:doExportOnNewTask()
+	for i, rendition in session:renditions() do
+		local photo = rendition.photo or photos[ i ]
+		if progress:isCanceled() then
+			-- Don't render what nobody will look at; the export task finishes
+			-- promptly instead of filling the run folder behind the cleanup.
+			LrTasks.pcall( function() rendition:skipRender() end )
 		else
-			local file, werr = writeTempJpeg( bytes )
-			if file then it.file = file else it.err = werr end
+			-- PhotoMeta calls the SDK getters BARE — they yield (catalog read access),
+			-- and a yield cannot cross a plain pcall in Lua 5.1. The pcall wrappers
+			-- that used to sit here failed on every call because of that, which
+			-- silently untimed every frame and broke burst grouping in the field
+			-- (see shared/PhotoMeta.lua and photometa_spec.lua).
+			local meta = PhotoMeta.read( photo, cfg.burstDetect )
+			progress:setCaption( string.format( 'Rendering %s (%d of %d)', meta.label, i, #photos ) )
+			progress:setPortionComplete( i - 1, #photos )
+
+			local it = { id = i, photo = photo, label = meta.label, t = meta.t, serial = meta.serial, file = false }
+			-- BLOCKS until this photo is rendered: (true, path) or (false, message).
+			local ok, pathOrMessage = rendition:waitForRender()
+			if ok and type( pathOrMessage ) == 'string' and LrFileUtils.exists( pathOrMessage ) == 'file' then
+				it.file = pathOrMessage
+			else
+				it.err = ( not ok and pathOrMessage ) or 'could not render a preview JPEG'
+			end
+			items[ #items + 1 ] = it
 		end
-		items[ i ] = it
 	end
 
 	-- Fingerprint all renders in one helper call (hash mode: local, no Chrome).
 	local function hashFiles( files )
-		local listFile = writeTempList( files )
+		local listFile = writeTempList( runDir, files )
 		if not listFile then return nil end
 		local hashes = assist.hash( listFile, #files )
 		LrFileUtils.delete( listFile )
@@ -228,9 +244,19 @@ function M.run( context )
 			-- past the first (see shared/KeywordApply.lua).
 			local clusterPhotos = {}
 			for _, m in ipairs( members ) do clusterPhotos[ #clusterPhotos + 1 ] = m.photo end
-			catalog:withWriteAccessDo( undoLabel, function()
+			local status = catalog:withWriteAccessDo( undoLabel, function()
 				KeywordApply.applyCluster( catalog, clusterPhotos, plan, cfg )
-			end, { timeout = 30 } )
+			end, { timeout = WRITE_TIMEOUT_SECONDS } )
+			-- With a timeout the SDK does NOT throw when the catalog stays busy: it
+			-- returns "aborted" and the function never ran ("executed" is success;
+			-- "queued" only exists for asynchronous writes). This status used to be
+			-- ignored, so a lost write was still reported as "tagged N". Tell TagRun
+			-- the truth; it stops the run rather than lose the next pick the same way.
+			if status ~= nil and status ~= 'executed' then
+				return false, string.format( 'Lightroom’s catalog stayed busy for %d s — write status “%s”',
+					WRITE_TIMEOUT_SECONDS, tostring( status ) )
+			end
+			return true
 		end,
 		onClusterDone = function( members ) -- free the disk as each burst finishes
 			for _, m in ipairs( members ) do
@@ -256,8 +282,9 @@ function M.run( context )
 		out.skipped > 0 and ( ', skipped ' .. out.skipped ) or '' )
 	local bezel
 	if out.aborted then
-		-- The user closed the Chrome window (or the wait timed out): the run
-		-- stopped early; whatever was tagged before the stop was kept.
+		-- The user closed the Chrome window (or the wait timed out, or a write
+		-- was lost): the run stopped early; whatever was tagged before the stop
+		-- was kept.
 		bezel = string.format( 'Species Tagger stopped — %s. %s so far.',
 			out.abortReason or 'the run was interrupted', tally )
 	else

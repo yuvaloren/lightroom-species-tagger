@@ -47,7 +47,7 @@ Full guide on the [wiki](https://github.com/yuvaloren/lightroom-species-tagger/w
   (configurable) are grouped automatically — the counter shows "Burst 2 of 5 — 12
   photos", and one Tag (or Skip) covers the whole burst. Detection is fully local:
   capture times from the catalog plus a perceptual fingerprint of the rendered
-  previews; a different subject seconds later never groups.
+  JPEGs; a different subject seconds later never groups.
 - **Cross-platform:** macOS and Windows.
 
 ## Install (from a release)
@@ -239,7 +239,8 @@ to vendor.
 
 ## Privacy
 
-A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS) is uploaded to
+A **downsized, freshly-rendered** JPEG (so no original EXIF/GPS; only a copyright
+notice, if you have filled one in, survives Lightroom's export) is uploaded to
 Google Lens. No third-party image host is involved. Taxonomy lookups send only
 **names** to GBIF, and no user-typed text is sent anywhere. The full data flow is
 on the wiki's [Privacy](https://github.com/yuvaloren/lightroom-species-tagger/wiki/Privacy)

@@ -6,9 +6,13 @@ is exactly what leaves your machine, and when.
 ## What is sent
 
 Before anything is sent, the photo is rendered to a **downsized JPEG**
-(longest edge ≈ 1024 px by default). Because it's a fresh render, the original
-**EXIF/GPS metadata is not included** in what's sent. No third-party image host
-is involved — the bytes go straight to Google Lens.
+(longest edge ≈ 1024 px by default) through Lightroom's own export pipeline,
+with the current develop settings applied. Because it's a fresh render, the original
+**EXIF/GPS metadata is not included** in what's sent — camera, lens, location
+and face data are all stripped. The one field Lightroom cannot be told to omit
+from an export is the **copyright notice**: if you have filled it in, it travels
+with the JPEG. No third-party image host is involved — the bytes go straight to
+Google Lens.
 
 ### Google Lens
 - The downsized JPEG **bytes** are uploaded to `lens.google.com` (the same
