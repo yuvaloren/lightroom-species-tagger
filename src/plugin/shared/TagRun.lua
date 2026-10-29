@@ -16,7 +16,10 @@ The invariants below are what the spec pins:
     the current one;
   * a non-decision — the user closed the Chrome window, the wait timed out, or
     the helper failed — ABORTS the whole run rather than silently advancing;
-  * a tagged cluster's keywords are applied to EVERY member, in one write.
+  * a tagged cluster's keywords are applied to EVERY member, in one write;
+  * a write that did NOT happen (applyCluster reports the catalog stayed busy
+    past its timeout) is never counted as tagged: the run stops and says so,
+    instead of reporting "tagged N" for keywords that were never saved.
 
 run( deps ) -> summary
   deps.items        array (selection order) of
@@ -32,7 +35,11 @@ run( deps ) -> summary
   deps.aborted      the errKind value `tag` returns when the user closed the Lens
                     window (or the wait timed out) — a non-decision that stops the run.
   deps.resolve      function(name) -> { ok, taxon = { scientificName, commonName }, plan }
-  deps.applyCluster function(memberItems[], plan) -> nil  (caller wraps ONE undo).
+  deps.applyCluster function(memberItems[], plan) -> ok|nil, err  (caller wraps ONE
+                    undo). Return `false, reason` when the write could not be
+                    performed (e.g. withWriteAccessDo timed out — the catalog
+                    was busy): the cluster is NOT counted as applied and the run
+                    stops, since the user's decision was lost. nil/true = written.
   deps.closeWindow  optional function() -> nil  (shut the reused Lens window). Called
                     ONCE at the end, and ONLY on a clean finish — never on an abort, so a
                     window the user is still reading (or a page that failed) is left open.
@@ -143,10 +150,21 @@ function M.run( deps )
 				if res and res.ok then
 					local members = {}
 					for _, i in ipairs( cl ) do members[ #members + 1 ] = items[ i ] end
-					deps.applyCluster( members, res.plan )
-					applied = applied + #cl
-					lines[ #lines + 1 ] = string.format( '✓ %s%s — %s (%s)', repLabel, moreSuffix( #cl ),
-						res.taxon.commonName or res.taxon.scientificName, res.taxon.scientificName )
+					local written, werr = deps.applyCluster( members, res.plan )
+					if written == false then
+						-- The user Tagged, but the keywords were NOT saved (the catalog
+						-- stayed busy past the write timeout). Never report this as
+						-- tagged; stop here so no further decisions are lost the same way.
+						abortReason = string.format( 'the keywords for %s could not be saved (%s)',
+							repLabel, tostring( werr or 'the catalog was busy' ) )
+						lines[ #lines + 1 ] = '■ ' .. repLabel .. moreSuffix( #cl ) .. ' — run stopped: ' .. abortReason
+						log.warn( 'assist run stopped: ' .. abortReason )
+						aborted = true
+					else
+						applied = applied + #cl
+						lines[ #lines + 1 ] = string.format( '✓ %s%s — %s (%s)', repLabel, moreSuffix( #cl ),
+							res.taxon.commonName or res.taxon.scientificName, res.taxon.scientificName )
+					end
 				else
 					skipped = skipped + #cl
 					lines[ #lines + 1 ] = '⊘ ' .. repLabel .. moreSuffix( #cl ) ..

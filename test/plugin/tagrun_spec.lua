@@ -306,3 +306,70 @@ describe( 'TagRun.run — the window closes only on a real decision', function()
 		assert.equal( 1, r.closed )
 	end )
 end )
+
+describe( 'TagRun.run — a catalog write that did not happen is never "tagged"', function()
+	-- Field shape: catalog:withWriteAccessDo( …, { timeout = 30 } ) returns
+	-- "aborted" (it does not throw) when the catalog stays busy for the whole
+	-- timeout. TagSpecies turns that into applyCluster -> false, reason. The old
+	-- loop ignored the status, counted the cluster as applied, and the closing
+	-- bezel said "tagged N" for keywords that were never saved.
+	it( 'does not count the cluster, stops the run, and names the photo', function()
+		local r = recorder { 'Sula nebouxii', 'Sula granti' }
+		local calls = 0
+		local out = TagRun.run {
+			items = items( 4 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve,
+			applyCluster = function( members, plan )
+				calls = calls + 1
+				return false, 'the catalog was busy for 30 s' -- the write never ran
+			end,
+			closeWindow = r.deps.closeWindow,
+		}
+		assert.equal( 1, calls ) -- cluster 2 was never attempted
+		assert.equal( 1, #r.tagCalls )
+		assert.equal( 0, out.applied ) -- NOT reported as tagged
+		assert.is_true( out.aborted )
+		assert.truthy( out.abortReason:match( 'IMG_1' ) ) -- names the photo whose pick was lost
+		assert.truthy( out.abortReason:match( 'busy' ) ) -- and why
+		assert.truthy( out.lines[ 1 ]:match( 'could not be saved' ) )
+		assert.equal( 0, r.closed ) -- abort: the window is left open, as for any abort
+	end )
+
+	it( 'a nil/true return from applyCluster still counts as written (existing fakes)', function()
+		local r = recorder { 'Sula nebouxii' }
+		local out = TagRun.run {
+			items = items( 2 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 } },
+			hashFiles = function( f ) return { 'x', 'x' } end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled,
+			resolve = r.deps.resolve,
+			applyCluster = function() return true end,
+		}
+		assert.equal( 2, out.applied )
+		assert.is_falsy( out.aborted )
+	end )
+
+	it( 'keeps what was written before the failed write', function()
+		local r = recorder { 'Sula nebouxii', 'Sula granti', 'Sula sula' }
+		local n = 0
+		local out = TagRun.run {
+			items = items( 6 ), cfg = baseCfg(),
+			cluster = fixedClusters { { 1, 2 }, { 3, 4 }, { 5, 6 } },
+			hashFiles = function( f ) local h = {}; for i = 1, #f do h[ i ] = 'x' end; return h end,
+			tag = r.deps.tag, cancelled = r.deps.cancelled, aborted = r.deps.aborted,
+			resolve = r.deps.resolve,
+			applyCluster = function( members, plan )
+				n = n + 1
+				if n == 2 then return false, 'busy' end
+				r.deps.applyCluster( members, plan )
+			end,
+		}
+		assert.equal( 1, #r.applied ) -- cluster 1 written
+		assert.equal( 2, out.applied ) -- cluster 1's two photos, nothing else
+		assert.equal( 2, #r.tagCalls ) -- cluster 3 never shown
+		assert.is_true( out.aborted )
+	end )
+end )
