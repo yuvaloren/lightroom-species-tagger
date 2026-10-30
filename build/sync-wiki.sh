@@ -23,7 +23,7 @@ cd "$(dirname "$0")/.." # repo root
 say() { printf '\033[1;34m==>\033[0m %s\n' "$*"; }
 die() { printf '\033[1;31msync-wiki:\033[0m %s\n' "$*" >&2; exit 1; }
 
-WIKI_REMOTE="git@github.com:yuvaloren/lightroom-species-tagger.wiki.git"
+WIKI_REMOTE="https://github.com/yuvaloren/lightroom-species-tagger.wiki.git"
 
 # Extract one "## Heading" section (heading line included) from a markdown file.
 section() { # $1 = file, $2 = exact heading text (without ##)
