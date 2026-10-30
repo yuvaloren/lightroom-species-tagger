@@ -3,6 +3,21 @@
 All notable changes to this project are documented here. The format is based on
 [Keep a Changelog](https://keepachangelog.com/) and the project follows
 [Semantic Versioning](https://semver.org/).
+## [0.4.1] - 2026-10-30
+
+### Chore
+
+- Reopen development at 0.4.1-dev
+
+### Fixed
+
+- Stop the run instead of counting a lost catalog write as tagged
+- Fix plugin when operating on unsaved changes in Develop tab
+
+### Ci
+
+- Bump the actions group across 1 directory with 2 updates (#7)
+
 
 ## [0.4.0] - 2026-07-19
 
