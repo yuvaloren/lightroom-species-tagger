@@ -23,11 +23,11 @@ jobs:
         with:
           fetch-depth: 0 # git-cliff needs full history + tags
 
-      - uses: leafo/gh-actions-lua@6919171ccf181b826f44b9bca76307b577217377 # v13
+      - uses: leafo/gh-actions-lua@32909a2dea0a48c433aec79e7fcd31b4cd55800f # v13
         with:
           luaVersion: "5.1.5"
 
-      - uses: leafo/gh-actions-luarocks@35d062def313a7699a0d513e996bcf4352f05389 # v6
+      - uses: leafo/gh-actions-luarocks@1c4a92caecc8f6850f673cbadfd57b3e555417ce # v6
 
       - name: Install Lua tooling
         # luacheck is pinned because the gate is "0 warnings" — a new luacheck
@@ -195,7 +195,7 @@ jobs:
           echo "installer + wiki scripts ok"
 
       - name: Upload artifacts
-        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
           name: lrplugin
           path: |
